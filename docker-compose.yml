@@ -58,6 +58,20 @@ services:
     networks:
       - content-agent-network
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://app:8000
+      - NEXT_PUBLIC_APP_NAME=智创笔记
+    depends_on:
+      - app
+    networks:
+      - content-agent-network
+
 volumes:
   pgdata:
   redisdata:
