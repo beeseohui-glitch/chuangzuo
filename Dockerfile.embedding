@@ -1,0 +1,22 @@
+# Embedding服务Dockerfile
+# Phase 2中使用独立的Embedding服务
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt sentence-transformers torch
+
+# Copy embedding service
+COPY embedding_service/ ./embedding_service/
+
+EXPOSE 8080
+
+CMD ["python", "-m", "uvicorn", "embedding_service.main:app", "--host", "0.0.0.0", "--port", "8080"]

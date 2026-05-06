@@ -1,0 +1,48 @@
+groups:
+  - name: content_agent_alerts
+    interval: 30s
+    rules:
+      - alert: HighCPUUsage
+        expr: cpu_usage_percent > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU使用率过高"
+          description: "CPU使用率超过80%，当前值: {{ $value }}%"
+
+      - alert: HighMemoryUsage
+        expr: memory_usage_percent > 90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "内存使用率过高"
+          description: "内存使用率超过90%，当前值: {{ $value }}%"
+
+      - alert: LLMLatencyHigh
+        expr: llm_latency_p95 > 15
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM延迟过高"
+          description: "LLM P95延迟超过15秒，当前值: {{ $value }}s"
+
+      - alert: AgentFailureRateHigh
+        expr: rate(agent_calls_total{status="failure"}[5m]) / rate(agent_calls_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Agent失败率过高"
+          description: "Agent失败率超过10%"
+
+      - alert: VectorSearchSlow
+        expr: vector_search_duration_seconds > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "向量检索过慢"
+          description: "向量检索延迟超过2秒"

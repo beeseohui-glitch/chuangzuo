@@ -1,0 +1,227 @@
+"""
+Result Validator - Agent间传递数据的质量校验
+"""
+
+from typing import Optional
+from models import (
+    MaterialPack,
+    TitleOutput,
+    NoteOutput,
+    ValidationResult,
+    MaterialPackValidation,
+    TitleValidation,
+    ArticleValidation,
+)
+
+
+class ResultValidator:
+    """Agent间传递数据的质量校验"""
+
+    def validate_material_pack(self, pack: MaterialPack) -> MaterialPackValidation:
+        """
+        素材包质量校验
+
+        Args:
+            pack: 素材包
+
+        Returns:
+            MaterialPackValidation: 验证结果
+        """
+        issues = []
+        warnings = []
+        missing_fields = []
+
+        # 检查品牌信息
+        has_brand = pack.brand is not None and bool(pack.brand.name)
+        if not has_brand:
+            missing_fields.append("brand")
+            issues.append("缺少品牌信息")
+
+        # 检查产品信息
+        has_product = pack.product is not None and bool(pack.product.name)
+        if not has_product:
+            missing_fields.append("product")
+            issues.append("缺少产品信息")
+
+        # 检查卖点数量
+        selling_points_count = 0
+        if pack.product and pack.product.selling_points:
+            selling_points_count = len(pack.product.selling_points)
+
+        if selling_points_count < 2:
+            issues.append("卖点不足，至少需要2个")
+
+        # 检查人群画像
+        has_persona = pack.persona is not None and bool(pack.persona.profile)
+        if not has_persona:
+            missing_fields.append("persona")
+            issues.append("缺少人群画像")
+
+        # 检查场景
+        if not pack.scene or len(pack.scene) == 0:
+            warnings.append("缺少使用场景信息")
+
+        passed = len(issues) == 0 and has_brand and has_product and has_persona
+
+        return MaterialPackValidation(
+            passed=passed,
+            issues=issues,
+            warnings=warnings,
+            missing_fields=missing_fields,
+            has_brand=has_brand,
+            has_product=has_product,
+            has_persona=has_persona,
+            selling_points_count=selling_points_count,
+        )
+
+    def validate_title_output(
+        self,
+        titles: TitleOutput,
+        historical_titles: Optional[list[str]] = None,
+    ) -> TitleValidation:
+        """
+        标题输出质量校验
+
+        Args:
+            titles: 标题输出
+            historical_titles: 历史标题列表（用于去重检查）
+
+        Returns:
+            TitleValidation: 验证结果
+        """
+        issues = []
+        warnings = []
+
+        # 检查标题数量
+        title_count = len(titles.titles)
+        if title_count < 5:
+            issues.append("标题数量不足5个")
+
+        if title_count == 0:
+            return TitleValidation(
+                passed=False,
+                issues=["没有生成任何标题"],
+                title_count=0,
+            )
+
+        # 检查相似度
+        has_similarity_issue = False
+        if title_count >= 2:
+            for i in range(len(titles.titles)):
+                for j in range(i + 1, len(titles.titles)):
+                    title1 = titles.titles[i].title
+                    title2 = titles.titles[j].title
+                    if self._calculate_similarity(title1, title2) > 0.6:
+                        has_similarity_issue = True
+                        issues.append(
+                            f"标题 '{title1[:15]}...' 和 '{title2[:15]}...' 相似度过高"
+                        )
+
+        # 检查违禁词
+        has_prohibited_words = False
+        from tools import ProhibitedWordDetector
+
+        detector = ProhibitedWordDetector()
+        for title_option in titles.titles:
+            if detector.has_prohibited(title_option.title):
+                has_prohibited_words = True
+                issues.append(f"标题含违禁词: {title_option.title[:20]}")
+
+        # 检查历史标题重复
+        if historical_titles and not has_similarity_issue:
+            for title_option in titles.titles:
+                for hist_title in historical_titles:
+                    if self._calculate_similarity(title_option.title, hist_title) > 0.7:
+                        warnings.append(
+                            f"标题可能与历史标题重复: {title_option.title[:20]}"
+                        )
+                        break
+
+        passed = len(issues) == 0 and not has_similarity_issue and not has_prohibited_words
+
+        return TitleValidation(
+            passed=passed,
+            issues=issues,
+            warnings=warnings,
+            title_count=title_count,
+            has_similarity_issue=has_similarity_issue,
+            has_prohibited_words=has_prohibited_words,
+        )
+
+    def validate_article_output(
+        self,
+        article: NoteOutput,
+        min_words: int = 300,
+        max_words: int = 600,
+    ) -> ArticleValidation:
+        """
+        正文输出质量校验
+
+        Args:
+            article: 笔记输出
+            min_words: 最小字数
+            max_words: 最大字数
+
+        Returns:
+            ArticleValidation: 验证结果
+        """
+        issues = []
+
+        # 检查AI味评分
+        if article.ai_flavor_score < 70:
+            issues.append(f"AI味评分过低：{article.ai_flavor_score}")
+
+        # 检查字数
+        word_count = len(article.article)
+        in_word_count_range = min_words <= word_count <= max_words
+        if not in_word_count_range:
+            issues.append(f"字数不合规：{word_count}字（要求{min_words}-{max_words}字）")
+
+        # 检查违禁词
+        from tools import ProhibitedWordDetector
+
+        detector = ProhibitedWordDetector()
+        has_prohibited_words = detector.has_prohibited(article.article)
+
+        if has_prohibited_words:
+            issues.append("正文含违禁词")
+
+        # 检查段落结构
+        if not article.paragraphs or len(article.paragraphs) < 3:
+            issues.append("段落结构不完整")
+
+        passed = len(issues) == 0 and article.ai_flavor_score >= 70 and in_word_count_range
+
+        return ArticleValidation(
+            passed=passed,
+            issues=issues,
+            word_count=word_count,
+            ai_flavor_score=article.ai_flavor_score,
+            has_prohibited_words=has_prohibited_words,
+            in_word_count_range=in_word_count_range,
+        )
+
+    def _calculate_similarity(self, text1: str, text2: str) -> float:
+        """
+        计算两个文本的相似度（简单版）
+
+        Args:
+            text1: 文本1
+            text2: 文本2
+
+        Returns:
+            float: 相似度 0-1
+        """
+        if not text1 or not text2:
+            return 0.0
+
+        # 简单的字符级Jaccard相似度
+        set1 = set(text1)
+        set2 = set(text2)
+        intersection = len(set1 & set2)
+        union = len(set1 | set2)
+
+        if union == 0:
+            return 0.0
+
+        return intersection / union

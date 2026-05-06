@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: content-agent-db
+    environment:
+      POSTGRES_DB: content_agent
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: your_password_here
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d content_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - content-agent-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: content-agent-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    networks:
+      - content-agent-network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8501:8501"
+      - "8000:8000"
+    environment:
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY}
+      - MINIMAX_BASE_URL=${MINIMAX_BASE_URL:-https://api.minimax.chat/v1}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=agent
+      - POSTGRES_PASSWORD=your_password_here
+      - POSTGRES_DB=content_agent
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./vault:/app/vault
+    networks:
+      - content-agent-network
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  content-agent-network:
+    driver: bridge
