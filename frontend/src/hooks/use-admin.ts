@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api';
-import { extractItems } from '@/lib/api-helpers';
+import { extractItems, extractSingle } from '@/lib/api-helpers';
 import { KnowledgeEntry } from '@/types';
 
 // --- Types ---
@@ -40,6 +40,60 @@ export interface AdminStats {
   category_distribution: { name: string; value: number }[];
   search_hotness: { keyword: string; count: number; trend: string }[];
   tenant_usage: { total_tenants: number; active_tenants: number; total_queries: number; avg_queries_per_tenant: number };
+}
+
+// --- 租户管理 Types ---
+
+export interface AdminTenant {
+  id: string;
+  name: string;
+  industry: string | null;
+  plan_type: string;
+  quota_monthly: number;
+  quota_used: number;
+  settings: Record<string, unknown>;
+  status: string;
+  expire_at: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  created_at: string;
+  updated_at: string;
+  user_count: number;
+}
+
+export interface AdminTenantUser {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  enterprise_id: string | null;
+  avatar_url: string | null;
+  status: string;
+  last_login_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminTenantStats {
+  monthly_notes: number;
+  monthly_avg_ai_score: number;
+  monthly_compliance_rate: number;
+  total_notes: number;
+}
+
+export interface AdminTenantLog {
+  id: string;
+  user_id: string | null;
+  enterprise_id: string | null;
+  action: string;
+  resource_type: string;
+  resource_id: string | null;
+  details: Record<string, unknown>;
+  ip_address: string | null;
+  created_at: string;
+  user_name?: string;
+  user_email?: string;
 }
 
 // --- Hooks ---
@@ -264,5 +318,214 @@ export function useAdminStats() {
       };
     },
     staleTime: 60 * 1000,
+  });
+}
+
+// ══════════════════════════════════════════════════════════
+// 租户管理 Hooks
+// ══════════════════════════════════════════════════════════
+
+export function useAdminTenants(params?: { plan?: string; status?: string; search?: string; page?: number; page_size?: number }) {
+  return useQuery<{ items: AdminTenant[]; total: number; page: number; page_size: number }>({
+    queryKey: ['admin', 'tenants', params],
+    queryFn: async () => {
+      const res = await adminApi.getTenants(params);
+      if (!res.success) throw new Error(res.error || '获取企业列表失败');
+      return res.data as { items: AdminTenant[]; total: number; page: number; page_size: number };
+    },
+    staleTime: 0,
+  });
+}
+
+export function useAdminTenant(id: string | null) {
+  return useQuery<AdminTenant>({
+    queryKey: ['admin', 'tenant', id],
+    queryFn: async () => {
+      if (!id) throw new Error('企业ID不能为空');
+      const res = await adminApi.getTenant(id);
+      if (!res.success) throw new Error(res.error || '获取企业详情失败');
+      return res.data as AdminTenant;
+    },
+    enabled: !!id,
+    staleTime: 0,
+  });
+}
+
+export function useCreateAdminTenant() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: {
+      name: string; industry?: string; plan_type?: string; quota_monthly?: number;
+      admin_email: string; admin_password?: string;
+      contact_name?: string; contact_email?: string; contact_phone?: string;
+    }) => {
+      const res = await adminApi.createTenant(data);
+      if (!res.success) throw new Error(res.error || '创建企业失败');
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'tenants'] });
+    },
+  });
+}
+
+export function useUpdateAdminTenant() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: {
+      name?: string; industry?: string; plan_type?: string; quota_monthly?: number;
+      status?: string; expire_at?: string;
+      contact_name?: string; contact_email?: string; contact_phone?: string;
+    } }) => {
+      const res = await adminApi.updateTenant(id, data);
+      if (!res.success) throw new Error(res.error || '更新企业失败');
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'tenants'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'tenant'] });
+    },
+  });
+}
+
+export function useDeleteAdminTenant() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await adminApi.deleteTenant(id);
+      if (!res.success) throw new Error(res.error || '删除企业失败');
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'tenants'] });
+    },
+  });
+}
+
+export function useUpdateTenantStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: string }) => {
+      const res = await adminApi.updateTenantStatus(id, status);
+      if (!res.success) throw new Error(res.error || '更新状态失败');
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'tenants'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'tenant'] });
+    },
+  });
+}
+
+export function useUpdateTenantQuota() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, quota_monthly, reason }: { id: string; quota_monthly: number; reason?: string }) => {
+      const res = await adminApi.updateTenantQuota(id, quota_monthly, reason);
+      if (!res.success) throw new Error(res.error || '调整额度失败');
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'tenants'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'tenant'] });
+    },
+  });
+}
+
+// ── 企业用户管理 Hooks ──
+
+export function useAdminTenantUsers(tenantId: string | null) {
+  return useQuery<AdminTenantUser[]>({
+    queryKey: ['admin', 'tenant', tenantId, 'users'],
+    queryFn: async () => {
+      if (!tenantId) throw new Error('企业ID不能为空');
+      const res = await adminApi.getTenantUsers(tenantId);
+      if (!res.success) throw new Error(res.error || '获取用户列表失败');
+      return extractItems<AdminTenantUser>(res);
+    },
+    enabled: !!tenantId,
+    staleTime: 0,
+  });
+}
+
+export function useCreateTenantUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ tenantId, data }: { tenantId: string; data: { email: string; name: string; password?: string; role?: string } }) => {
+      const res = await adminApi.createTenantUser(tenantId, data);
+      if (!res.success) throw new Error(res.error || '创建用户失败');
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'tenant'] });
+    },
+  });
+}
+
+export function useUpdateUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ userId, data }: { userId: string; data: { name?: string; role?: string; status?: string } }) => {
+      const res = await adminApi.updateUser(userId, data);
+      if (!res.success) throw new Error(res.error || '更新用户失败');
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'tenant'] });
+    },
+  });
+}
+
+export function useResetUserPassword() {
+  return useMutation({
+    mutationFn: async ({ userId, new_password }: { userId: string; new_password?: string }) => {
+      const res = await adminApi.resetUserPassword(userId, new_password);
+      if (!res.success) throw new Error(res.error || '重置密码失败');
+      return res.data as { success: boolean; new_password: string };
+    },
+  });
+}
+
+export function useUpdateUserStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ userId, status }: { userId: string; status: string }) => {
+      const res = await adminApi.updateUserStatus(userId, status);
+      if (!res.success) throw new Error(res.error || '更新状态失败');
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'tenant'] });
+    },
+  });
+}
+
+// ── 企业统计与日志 Hooks ──
+
+export function useAdminTenantStats(tenantId: string | null) {
+  return useQuery<AdminTenantStats>({
+    queryKey: ['admin', 'tenant', tenantId, 'stats'],
+    queryFn: async () => {
+      if (!tenantId) throw new Error('企业ID不能为空');
+      const res = await adminApi.getTenantStats(tenantId);
+      if (!res.success) throw new Error(res.error || '获取统计失败');
+      return res.data as AdminTenantStats;
+    },
+    enabled: !!tenantId,
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useAdminTenantLogs(tenantId: string | null, page?: number) {
+  return useQuery<{ items: AdminTenantLog[]; total: number }>({
+    queryKey: ['admin', 'tenant', tenantId, 'logs', page],
+    queryFn: async () => {
+      if (!tenantId) throw new Error('企业ID不能为空');
+      const res = await adminApi.getTenantLogs(tenantId, page);
+      if (!res.success) throw new Error(res.error || '获取日志失败');
+      return res.data as { items: AdminTenantLog[]; total: number };
+    },
+    enabled: !!tenantId,
+    staleTime: 0,
   });
 }

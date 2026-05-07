@@ -18,6 +18,10 @@ CREATE TABLE IF NOT EXISTS enterprises (
     quota_used INTEGER DEFAULT 0,
     settings JSONB DEFAULT '{}',
     status VARCHAR(20) DEFAULT 'active',
+    expire_at TIMESTAMP DEFAULT NULL,
+    contact_name VARCHAR(100) DEFAULT NULL,
+    contact_email VARCHAR(255) DEFAULT NULL,
+    contact_phone VARCHAR(50) DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

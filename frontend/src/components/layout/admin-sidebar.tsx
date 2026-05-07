@@ -11,6 +11,7 @@ import {
   Building2,
   FileText,
   ShieldCheck,
+  Users,
   BarChart3,
   ChevronLeft,
   Shield,
@@ -26,6 +27,7 @@ const navItems = [
   { title: '行业知识库', href: '/admin/knowledge/industry', icon: Building2 },
   { title: '内置模板', href: '/admin/templates', icon: FileText },
   { title: '合规词库', href: '/admin/compliance', icon: ShieldCheck },
+  { title: '租户管理', href: '/admin/tenants', icon: Users },
   { title: '数据统计', href: '/admin/stats', icon: BarChart3 },
 ];
 
@@ -149,14 +151,14 @@ export function AdminSidebar() {
           {collapsed ? (
             <TooltipProvider delay={0}>
               <Tooltip>
-                <TooltipTrigger render={<span>v2.1</span>} />
-                <TooltipContent side="right">平台管理后台 v2.1</TooltipContent>
+                <TooltipTrigger render={<span>v2.2</span>} />
+                <TooltipContent side="right">平台管理后台 v2.2</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           ) : (
             <>
               <span>平台管理后台</span>
-              <span>v2.1</span>
+              <span>v2.2</span>
             </>
           )}
         </div>
