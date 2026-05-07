@@ -1,24 +1,32 @@
 """
 合规 Agent - 内容合规审核专家
+
+Prompt：从 prompts/compliance_agent.md 加载
+P0/P1/P2 三级合规检查
+输出：ComplianceReport
+Harness：JSON解析 + status映射 + 降级报告
 """
 
 import json
-import os
+import logging
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
 from crewai import Agent
-from crewai.llm import LLM
 from crewai.tools import BaseTool
 
-from config import COMPLIANCE_AGENT, LLMConfig, XiaohongshuConfig
+from config import COMPLIANCE_AGENT, LLMManagerConfig, XiaohongshuConfig
 from models import (
     ComplianceReport,
     ComplianceStatus,
     ComplianceSeverity,
     ComplianceIssue,
 )
+from tools.prompt_tools import prompt_manager
+from tools.crewai_llm import create_llm
+from tools.llm_tools import LLMCallTool, LLMResponseParser
+
+logger = logging.getLogger(__name__)
 
 
 class ComplianceAgent:
@@ -26,53 +34,39 @@ class ComplianceAgent:
 
     def __init__(
         self,
-        llm_config: Optional[LLMConfig] = None,
+        llm_config: Optional[LLMManagerConfig] = None,
         platform_config: Optional[XiaohongshuConfig] = None,
         tools: Optional[list[BaseTool]] = None,
     ):
         self.config = COMPLIANCE_AGENT
         self.platform_config = platform_config or XiaohongshuConfig()
-        self.llm_config = llm_config
-        self.tools = tools or []
+        self._llm_config = llm_config
+        self._tools = tools or []
         self._agent: Optional[Agent] = None
+        self._llm_tool: Optional[LLMCallTool] = None
+
+    @property
+    def llm_tool(self) -> LLMCallTool:
+        """获取 LLM 调用工具（带降级）"""
+        if self._llm_tool is None:
+            self._llm_tool = LLMCallTool(self._llm_config)
+        return self._llm_tool
 
     @property
     def agent(self) -> Agent:
         """获取 CrewAI Agent 实例"""
         if self._agent is None:
-            prompt_path = Path(self.config.prompt_file)
-            if prompt_path.exists():
-                with open(prompt_path, "r", encoding="utf-8") as f:
-                    self._prompt_template = f.read()
-            else:
-                self._prompt_template = self._get_default_prompt()
+            prompt = prompt_manager.load_prompt("compliance_agent")
 
             self._agent = Agent(
                 role="内容合规审核专家",
                 goal="检查内容合规性并生成报告",
-                backstory=self._prompt_template,
-                tools=self.tools,
+                backstory=prompt,
+                tools=self._tools,
                 verbose=True,
-                llm=LLM(
-                    model="openai/MiniMax-M2.7",
-                    api_key=os.getenv("MINIMAX_API_KEY", ""),
-                    api_base=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.chat/v1"),
-                    llm_type="litellm",
-                ),
+                llm=create_llm(self._llm_config),
             )
         return self._agent
-
-    @property
-    def _llm(self):
-        """获取 LLM 配置"""
-        if self.llm_config:
-            return self.llm_config
-        from openai import OpenAI
-        import os
-        return OpenAI(
-            api_key=os.getenv("MINIMAX_API_KEY", ""),
-            api_base=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.chat/v1"),
-        )
 
     def check(
         self,
@@ -93,19 +87,27 @@ class ComplianceAgent:
         Returns:
             ComplianceReport: 合规报告
         """
-        prompt = self._build_prompt(title, article, tags, brand_taboos)
+        max_retries = self.config.max_retries
+        last_error = None
 
-        response = self.agent.kickoff(prompt)
+        for attempt in range(max_retries + 1):
+            prompt = self._build_prompt(title, article, tags, brand_taboos)
 
-        try:
-            content = response.content if hasattr(response, "content") else str(response)
-            return self._parse_response(content)
-        except Exception as e:
-            return ComplianceReport(
-                status=ComplianceStatus.NEEDS_REVISION,
-                checked_at=datetime.now().isoformat(),
-                suggestions=[f"检查失败: {str(e)}"],
-            )
+            try:
+                response = self.agent.kickoff(prompt)
+                content = response.content if hasattr(response, "content") else str(response)
+                return self._parse_response(content)
+
+            except Exception as e:
+                last_error = e
+                logger.error(f"Compliance check failed (attempt {attempt+1}): {e}")
+
+        # 所有重试失败，返回降级报告
+        return ComplianceReport(
+            status=ComplianceStatus.NEEDS_REVISION,
+            checked_at=datetime.now().isoformat(),
+            suggestions=[f"合规检查失败（已重试{max_retries}次）: {last_error}"],
+        )
 
     def _build_prompt(
         self,
@@ -188,10 +190,3 @@ P2（需人工确认）：灰色地带表述、创意表达边界
 
         raise ValueError(f"Cannot parse ComplianceReport from response: {content[:200]}")
 
-    def _get_default_prompt(self) -> str:
-        """获取默认提示词"""
-        return """你是内容合规审核专家，擅长检查广告法违禁词、医疗用语等合规问题。
-校验清单：
-P0（必须修改）：广告法违禁词、医疗用语
-P1（建议修改）：品牌调性偏离
-P2（需人工确认）：灰色地带表述"""

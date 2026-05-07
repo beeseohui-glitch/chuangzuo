@@ -7,6 +7,7 @@ from tools.obsidian_tools import ObsidianReaderTool, ObsidianSearchTool, Obsidia
 from tools.prompt_optimizer import PromptOptimizer
 from tools.content_adapter import ContentAdapter
 from tools.multi_platform_publisher import MultiPlatformPublisher, PublishStatus, PublishResult
+from tools.material_tools import MaterialSearchTool
 
 __all__ = [
     "LocalEmbeddingTool",
@@ -27,4 +28,5 @@ __all__ = [
     "MultiPlatformPublisher",
     "PublishStatus",
     "PublishResult",
+    "MaterialSearchTool",
 ]

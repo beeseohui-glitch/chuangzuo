@@ -1,3 +1,4 @@
+from agents.orchestrator_agent import OrchestratorAgent, OrchestratorOutput
 from agents.title_agent import TitleAgent
 from agents.article_agent import ArticleAgent
 from agents.tag_agent import TagAgent
@@ -11,6 +12,8 @@ from agents.wechat_article_agent import WechatArticleAgent
 from agents.douyin_script_agent import DouyinScriptAgent
 
 __all__ = [
+    "OrchestratorAgent",
+    "OrchestratorOutput",
     "TitleAgent",
     "ArticleAgent",
     "TagAgent",

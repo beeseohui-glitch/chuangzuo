@@ -33,13 +33,24 @@ const statusConfig: Record<
   },
 };
 
+// 兼容后端中文状态值
+const STATUS_MAP: Record<string, ComplianceStatusType> = {
+  '通过': 'passed',
+  'passed': 'passed',
+  '需修改': 'needs_revision',
+  'needs_revision': 'needs_revision',
+  '不合规': 'failed',
+  'failed': 'failed',
+};
+
 export function ComplianceBadge({
   status,
   className,
   showIcon = true,
   showLabel = true,
 }: ComplianceBadgeProps) {
-  const config = statusConfig[status];
+  const mappedStatus = STATUS_MAP[status] || 'passed';
+  const config = statusConfig[mappedStatus];
   const Icon = config.icon;
 
   return (

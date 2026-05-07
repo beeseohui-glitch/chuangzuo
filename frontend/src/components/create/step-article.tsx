@@ -14,7 +14,7 @@ export function StepArticle() {
   const {
     article, aiScore, aiScoreDetails, articleRetries, maxArticleRetries,
     isEditing, isProcessing,
-    setArticle, setArticleRetries, setIsEditing,
+    setArticle, setIsEditing, regenerateArticle,
     nextStep, prevStep,
   } = useCreateStore();
 
@@ -87,8 +87,8 @@ export function StepArticle() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  disabled={!canRegenerate}
-                  onClick={() => setArticleRetries(articleRetries + 1)}
+                  disabled={!canRegenerate || isProcessing}
+                  onClick={() => regenerateArticle()}
                 >
                   <RefreshCw className="mr-1 h-3.5 w-3.5" />
                   重新生成

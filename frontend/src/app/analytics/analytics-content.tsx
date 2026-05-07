@@ -10,6 +10,7 @@ import {
   BarChart3, TrendingUp, FileText, Lightbulb,
   ArrowUpRight, ArrowDownRight, Calendar, Filter,
 } from 'lucide-react';
+import Link from 'next/link';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
@@ -124,7 +125,7 @@ export default function AnalyticsContent() {
               <CardContent>
                 <div className="space-y-3">
                   {recentNotes.map((note: { id: string; title: string; platform: string; ai_score: number; compliance: string; date: string }) => (
-                    <div key={note.id} className="flex items-center justify-between rounded-lg border p-3 hover:bg-accent/30 transition-colors">
+                    <Link key={note.id} href={`/notes/${note.id}`} className="flex items-center justify-between rounded-lg border p-3 hover:bg-accent/30 transition-colors">
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-sm truncate">{note.title}</p>
                         <div className="flex items-center gap-3 mt-1">
@@ -136,7 +137,7 @@ export default function AnalyticsContent() {
                         <div className="text-right"><p className="text-xs text-muted-foreground">AI 味</p><p className="font-bold text-sm">{note.ai_score}</p></div>
                         {complianceBadge(note.compliance)}
                       </div>
-                    </div>
+                    </Link>
                   ))}
                 </div>
               </CardContent>

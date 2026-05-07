@@ -1,19 +1,26 @@
 """
 正文 Agent - 小红书正文创作专家
+
+Prompt：从 prompts/article_agent.md 加载
+输出：NoteOutput（article + paragraphs + ai_flavor_score）
+Harness：AI味评分 + 段落结构检查 + 最多重试2次
 """
 
 import json
-import os
-from pathlib import Path
+import logging
 from typing import Optional
 
 from crewai import Agent
-from crewai.llm import LLM
 from crewai.tools import BaseTool
 
-from config import ARTICLE_AGENT, LLMConfig
+from config import ARTICLE_AGENT, LLMManagerConfig
 from models import NoteOutput, Paragraph
 from validators import AIFlavorScorer
+from tools.prompt_tools import prompt_manager
+from tools.crewai_llm import create_llm
+from tools.llm_tools import LLMCallTool, LLMResponseParser
+
+logger = logging.getLogger(__name__)
 
 
 class ArticleAgent:
@@ -21,58 +28,43 @@ class ArticleAgent:
 
     def __init__(
         self,
-        llm_config: Optional[LLMConfig] = None,
+        llm_config: Optional[LLMManagerConfig] = None,
         tools: Optional[list[BaseTool]] = None,
     ):
         self.config = ARTICLE_AGENT
-        self.llm_config = llm_config
-        self.tools = tools or []
+        self._llm_config = llm_config
+        self._tools = tools or []
         self._agent: Optional[Agent] = None
+        self._llm_tool: Optional[LLMCallTool] = None
         self._scorer = AIFlavorScorer()
+
+    @property
+    def llm_tool(self) -> LLMCallTool:
+        """获取 LLM 调用工具（带降级）"""
+        if self._llm_tool is None:
+            self._llm_tool = LLMCallTool(self._llm_config)
+        return self._llm_tool
 
     @property
     def agent(self) -> Agent:
         """获取 CrewAI Agent 实例"""
         if self._agent is None:
-            prompt_path = Path(self.config.prompt_file)
-            if prompt_path.exists():
-                with open(prompt_path, "r", encoding="utf-8") as f:
-                    self._prompt_template = f.read()
-            else:
-                self._prompt_template = self._get_default_prompt()
+            prompt = prompt_manager.load_prompt("article_agent")
 
             self._agent = Agent(
                 role="小红书正文创作专家",
                 goal="创作符合小红书风格的高质量正文",
-                backstory=self._prompt_template,
-                tools=self.tools,
+                backstory=prompt,
+                tools=self._tools,
                 verbose=True,
-                llm=LLM(
-                    model="openai/MiniMax-M2.7",
-                    api_key=os.getenv("MINIMAX_API_KEY", ""),
-                    api_base=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.chat/v1"),
-                    llm_type="litellm",
-                ),
+                llm=create_llm(self._llm_config),
             )
         return self._agent
-
-    @property
-    def _llm(self):
-        """获取 LLM 配置"""
-        if self.llm_config:
-            return self.llm_config
-        from openai import OpenAI
-        import os
-        return OpenAI(
-            api_key=os.getenv("MINIMAX_API_KEY", ""),
-            api_base=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.chat/v1"),
-        )
 
     def generate(
         self,
         title: str,
         material_pack: dict,
-        max_retries: int = 2,
     ) -> NoteOutput:
         """
         生成正文
@@ -80,19 +72,20 @@ class ArticleAgent:
         Args:
             title: 选定的标题
             material_pack: 素材包
-            max_retries: 最大重试次数
 
         Returns:
             NoteOutput: 笔记输出
         """
+        max_retries = self.config.max_retries
+        last_error = None
+
         for attempt in range(max_retries + 1):
             prompt = self._build_prompt(title, material_pack, attempt)
 
-            response = self.agent.kickoff(prompt)
-
             try:
+                response = self.agent.kickoff(prompt)
                 content = response.content if hasattr(response, "content") else str(response)
-                data = self._parse_response(content)
+                data = LLMResponseParser.parse_json(content)
 
                 # Ensure title is set
                 if 'title' not in data:
@@ -114,21 +107,19 @@ class ArticleAgent:
                         note.metadata["warning"] = f"AI味评分{ai_score}分，建议人工润色"
                     return note
 
-            except Exception as e:
-                if attempt >= max_retries:
-                    return NoteOutput(
-                        title=title,
-                        article="",
-                        tags=[],
-                        ai_flavor_score=0,
-                        metadata={"error": str(e)},
-                    )
+                logger.warning(f"AI flavor score {ai_score} < 70, retrying ({attempt+1}/{max_retries})")
 
+            except Exception as e:
+                last_error = e
+                logger.error(f"Article generation failed (attempt {attempt+1}): {e}")
+
+        # 所有重试失败，返回降级结果
         return NoteOutput(
             title=title,
             article="",
             tags=[],
             ai_flavor_score=0,
+            metadata={"error": f"正文生成失败（已重试{max_retries}次）: {last_error}"},
         )
 
     def _build_prompt(
@@ -148,19 +139,25 @@ class ArticleAgent:
 - 使用感叹句和反问句增加情感
 """
 
+        brand = material_pack.get('brand') or {}
+        product = material_pack.get('product') or {}
+        persona = material_pack.get('persona') or {}
+        scenes = material_pack.get('scene') or []
+        scene_desc = scenes[0].get('description', '未知') if scenes else '未知'
+
         prompt = f"""
 请根据以下信息创作小红书正文：
 
 选定标题：{title}
 
 素材包信息：
-- 品牌：{material_pack.get('brand', {}).get('name', '未知')}
-- 产品：{material_pack.get('product', {}).get('name', '未知')}
-- 核心卖点：{', '.join(material_pack.get('product', {}).get('selling_points', [])[:3])}
-- 成分：{', '.join(material_pack.get('product', {}).get('ingredients', [])[:3])}
-- 人群：{material_pack.get('persona', {}).get('profile', '未知')}
-- 使用场景：{material_pack.get('scene', [{}])[0].get('description', '未知') if material_pack.get('scene') else '未知'}
-- 品牌禁忌：{', '.join(material_pack.get('brand', {}).get('taboos', []))}
+- 品牌：{brand.get('name', '未知')}
+- 产品：{product.get('name', '未知')}
+- 核心卖点：{', '.join((product.get('selling_points') or [])[:3])}
+- 成分：{', '.join((product.get('ingredients') or [])[:3])}
+- 人群：{persona.get('profile', '未知')}
+- 使用场景：{scene_desc}
+- 品牌禁忌：{', '.join(brand.get('taboos') or [])}
 
 {retry_instruction}
 
@@ -210,8 +207,3 @@ class ArticleAgent:
 
         return result
 
-    def _get_default_prompt(self) -> str:
-        """获取默认提示词"""
-        return """你是小红书正文创作专家，擅长创作口语化、真实感强的内容。
-结构模板：痛点引入→产品发现→卖点展开→真实体验→互动引导
-去AI味策略：口语化语气词、避免工整排比、句式长短不一、加入生活细节"""

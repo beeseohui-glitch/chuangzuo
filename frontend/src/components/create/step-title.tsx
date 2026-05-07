@@ -11,12 +11,29 @@ import { Check, RefreshCw, ArrowRight, ArrowLeft, Pencil } from 'lucide-react';
 export function StepTitle() {
   const {
     titleOptions, selectedTitles, customTitle, titleRetries, maxTitleRetries,
-    isProcessing, toggleTitle, setCustomTitle, setTitleRetries,
-    nextStep, prevStep,
+    taskStatus, isProcessing, toggleTitle, setCustomTitle, refreshTitles,
+    selectTitle, nextStep, prevStep,
   } = useCreateStore();
 
   const canRefresh = titleRetries < maxTitleRetries;
   const canProceed = selectedTitles.length > 0 || customTitle.trim().length > 0;
+  const isAwaitingSelection = taskStatus === 'awaiting_title_selection';
+
+  const handleNext = async () => {
+    // 如果是自定义标题，直接进入下一步
+    if (customTitle.trim().length > 0 && selectedTitles.length === 0) {
+      nextStep();
+      return;
+    }
+    // 如果选择了标题，通知后端
+    if (selectedTitles.length > 0) {
+      const selectedIndex = titleOptions.findIndex(t => t.title === selectedTitles[0]);
+      if (selectedIndex >= 0) {
+        await selectTitle(selectedIndex);
+      }
+      nextStep();
+    }
+  };
 
   if (isProcessing) {
     return (
@@ -84,8 +101,8 @@ export function StepTitle() {
         <Button
           variant="outline"
           className="mt-4 w-full"
-          disabled={!canRefresh}
-          onClick={() => setTitleRetries(titleRetries + 1)}
+          disabled={!canRefresh || isProcessing}
+          onClick={() => refreshTitles()}
         >
           <RefreshCw className="mr-2 h-4 w-4" />
           {canRefresh ? '换一批' : '已达重试上限'}
@@ -113,8 +130,8 @@ export function StepTitle() {
           <ArrowLeft className="mr-2 h-4 w-4" />
           上一步
         </Button>
-        <Button onClick={nextStep} disabled={!canProceed}>
-          下一步
+        <Button onClick={handleNext} disabled={!canProceed || isProcessing}>
+          {isProcessing ? '提交中...' : '下一步'}
           <ArrowRight className="ml-2 h-4 w-4" />
         </Button>
       </div>

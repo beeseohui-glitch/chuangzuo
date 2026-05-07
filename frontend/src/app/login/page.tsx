@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth-store';
+import { auth } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,15 +16,11 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
-  const [isDevMode, setIsDevMode] = useState(false);
 
   useEffect(() => {
-    const devMode = localStorage.getItem('dev_mode') !== 'false';
-    setIsDevMode(devMode);
-    if (devMode) {
-      setEmail('dev@example.com');
-      setPassword('123456');
-    }
+    // 预填租户账号
+    setEmail('admin@demo.com');
+    setPassword('123456');
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -32,7 +29,12 @@ export default function LoginPage() {
 
     const result = await login({ email, password });
     if (result.success) {
-      router.push('/dashboard');
+      const role = auth.getRole();
+      if (role === 'platform_admin') {
+        router.push('/admin');
+      } else {
+        router.push('/dashboard');
+      }
     } else {
       setError(result.error || '登录失败');
     }
@@ -156,11 +158,11 @@ export default function LoginPage() {
             </button>
           </p>
 
-          {isDevMode && (
-            <div className="rounded-lg bg-muted/50 border p-3 text-center text-xs text-muted-foreground">
-              开发模式已启用 — 任意邮箱密码即可登录
-            </div>
-          )}
+          <div className="rounded-lg bg-muted/50 border p-3 space-y-1 text-xs text-muted-foreground">
+            <p className="font-medium text-foreground/70 mb-2">测试账号</p>
+            <p>租户：admin@demo.com / 123456 → 工作台</p>
+            <p>管理员：platform@zhichuang.com / admin123 → 管理后台</p>
+          </div>
         </div>
       </div>
     </div>

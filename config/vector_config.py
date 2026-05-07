@@ -1,3 +1,4 @@
+import os
 from pydantic import BaseModel, Field
 from typing import Optional
 from enum import Enum
@@ -48,6 +49,16 @@ class VectorStoreConfig(BaseModel):
     # RLS 配置
     enable_rls: bool = Field(default=True, description="是否启用行级安全策略")
     enterprise_id_column: str = Field(default="enterprise_id", description="企业ID列名")
+
+    @classmethod
+    def from_env(cls) -> "VectorStoreConfig":
+        return cls(
+            host=os.getenv("DB_HOST", "localhost"),
+            port=int(os.getenv("DB_PORT", "5432")),
+            database=os.getenv("DB_NAME", "content_agent"),
+            user=os.getenv("DB_USER", "agent"),
+            password=os.getenv("DB_PASSWORD", "your_password_here"),
+        )
 
 
 class EmbeddingConfig(BaseModel):

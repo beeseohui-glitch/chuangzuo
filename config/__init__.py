@@ -5,8 +5,10 @@ from config.llm_config import (
     LLMManagerConfig,
     LLMProvider,
     MiniMaxConfig,
+    MimoConfig,
     DeepSeekConfig,
     QwenConfig,
+    load_llm_config_from_env,
 )
 from config.agent_config import (
     AgentSettings,
@@ -50,8 +52,10 @@ __all__ = [
     "LLMManagerConfig",
     "LLMProvider",
     "MiniMaxConfig",
+    "MimoConfig",
     "DeepSeekConfig",
     "QwenConfig",
+    "load_llm_config_from_env",
     # Agent Config
     "AgentSettings",
     "AgentType",

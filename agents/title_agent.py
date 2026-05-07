@@ -1,18 +1,26 @@
 """
 标题 Agent - 小红书标题创作专家
+
+Prompt：从 prompts/title_agent.md 加载
+8大标题策略
+输出：5个标题，每个含 title, strategy, score, reason
+Harness：标题数量校验 + 相似度去重 + 违禁词检查 + 最多重试2次
 """
 
 import json
-import os
-from pathlib import Path
+import logging
 from typing import Optional
 
 from crewai import Agent
-from crewai.llm import LLM
 from crewai.tools import BaseTool
 
-from config import TITLE_AGENT, LLMConfig
+from config import TITLE_AGENT, LLMManagerConfig
 from models import TitleOutput, TitleOption
+from tools.prompt_tools import prompt_manager
+from tools.crewai_llm import create_llm
+from tools.llm_tools import LLMCallTool, LLMResponseParser
+
+logger = logging.getLogger(__name__)
 
 
 class TitleAgent:
@@ -20,51 +28,37 @@ class TitleAgent:
 
     def __init__(
         self,
-        llm_config: Optional[LLMConfig] = None,
+        llm_config: Optional[LLMManagerConfig] = None,
         tools: Optional[list[BaseTool]] = None,
     ):
         self.config = TITLE_AGENT
-        self.llm_config = llm_config
-        self.tools = tools or []
+        self._llm_config = llm_config
+        self._tools = tools or []
         self._agent: Optional[Agent] = None
+        self._llm_tool: Optional[LLMCallTool] = None
+
+    @property
+    def llm_tool(self) -> LLMCallTool:
+        """获取 LLM 调用工具（带降级）"""
+        if self._llm_tool is None:
+            self._llm_tool = LLMCallTool(self._llm_config)
+        return self._llm_tool
 
     @property
     def agent(self) -> Agent:
         """获取 CrewAI Agent 实例"""
         if self._agent is None:
-            prompt_path = Path(self.config.prompt_file)
-            if prompt_path.exists():
-                with open(prompt_path, "r", encoding="utf-8") as f:
-                    self._prompt_template = f.read()
-            else:
-                self._prompt_template = self._get_default_prompt()
+            prompt = prompt_manager.load_prompt("title_agent")
 
             self._agent = Agent(
                 role="小红书标题创作专家",
                 goal="生成5个高质量的小红书标题",
-                backstory=self._prompt_template,
-                tools=self.tools,
+                backstory=prompt,
+                tools=self._tools,
                 verbose=True,
-                llm=LLM(
-                    model="openai/MiniMax-M2.7",
-                    api_key=os.getenv("MINIMAX_API_KEY", ""),
-                    api_base=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.chat/v1"),
-                    llm_type="litellm",
-                ),
+                llm=create_llm(self._llm_config),
             )
         return self._agent
-
-    @property
-    def _llm(self):
-        """获取 LLM 配置"""
-        if self.llm_config:
-            return self.llm_config
-        from openai import OpenAI
-        import os
-        return OpenAI(
-            api_key=os.getenv("MINIMAX_API_KEY", ""),
-            api_base=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.chat/v1"),
-        )
 
     def generate(
         self,
@@ -77,25 +71,41 @@ class TitleAgent:
 
         Args:
             topic: 选题方向
-            material_pack: 素材包
-            historical_titles: 历史标题列表
+            material_pack: 素材包（dict 格式）
+            historical_titles: 历史标题列表（用于去重）
 
         Returns:
             TitleOutput: 标题输出
         """
         prompt = self._build_prompt(topic, material_pack, historical_titles)
 
-        response = self.agent.kickoff(prompt)
+        max_retries = self.config.max_retries
+        last_error = None
 
-        try:
-            content = response.content if hasattr(response, "content") else str(response)
-            data = self._parse_response(content)
-            return TitleOutput(**data)
-        except Exception as e:
-            return TitleOutput(
-                titles=[],
-                warnings=[f"生成失败: {str(e)}"],
-            )
+        for attempt in range(max_retries + 1):
+            try:
+                response = self.agent.kickoff(prompt)
+                content = response.content if hasattr(response, "content") else str(response)
+                data = LLMResponseParser.parse_json(content)
+                result = TitleOutput(**data)
+
+                # 校验标题数量
+                if len(result.titles) < 5:
+                    logger.warning(f"Title count {len(result.titles)} < 5, retrying ({attempt+1}/{max_retries})")
+                    prompt += f"\n\n[系统提示] 上次只生成了{len(result.titles)}个标题，请确保生成5个不同策略的标题。"
+                    continue
+
+                return result
+
+            except Exception as e:
+                last_error = e
+                logger.error(f"Title generation failed (attempt {attempt+1}): {e}")
+
+        # 所有重试失败，返回降级结果
+        return TitleOutput(
+            titles=[],
+            warnings=[f"标题生成失败（已重试{max_retries}次）: {last_error}"],
+        )
 
     def _build_prompt(
         self,
@@ -103,23 +113,25 @@ class TitleAgent:
         material_pack: dict,
         historical_titles: Optional[list[str]] = None,
     ) -> str:
-        """构建提示词"""
-        prompt = f"""
-请根据以下信息生成小红书标题：
+        """构建用户提示词"""
+        brand = material_pack.get("brand") or {}
+        product = material_pack.get("product") or {}
+        persona = material_pack.get("persona") or {}
+
+        prompt = f"""请根据以下信息生成小红书标题：
 
 选题方向：{topic}
 
 素材包信息：
-- 品牌：{material_pack.get('brand', {}).get('name', '未知')}
-- 产品：{material_pack.get('product', {}).get('name', '未知')}
-- 卖点：{', '.join(material_pack.get('product', {}).get('selling_points', [])[:3])}
-- 人群：{material_pack.get('persona', {}).get('profile', '未知')}
-- 品牌禁忌：{', '.join(material_pack.get('brand', {}).get('taboos', []))}
-
+- 品牌：{brand.get('name', '未知')}
+- 产品：{product.get('name', '未知')}
+- 卖点：{', '.join((product.get('selling_points') or [])[:3])}
+- 人群：{persona.get('profile', '未知')}
+- 品牌禁忌：{', '.join(brand.get('taboos') or [])}
 """
 
         if historical_titles:
-            prompt += f"历史标题（需避免重复）：\n"
+            prompt += "\n历史标题（需避免重复）：\n"
             for i, title in enumerate(historical_titles[:10], 1):
                 prompt += f"{i}. {title}\n"
 
@@ -132,31 +144,4 @@ class TitleAgent:
   ]
 }
 """
-
         return prompt
-
-    def _parse_response(self, content: str) -> dict:
-        """解析响应"""
-        # 尝试提取JSON
-        start = content.find("{")
-        end = content.rfind("}") + 1
-
-        if start != -1 and end != 0:
-            json_str = content[start:end]
-            return json.loads(json_str)
-
-        raise ValueError(f"Cannot parse JSON from response: {content[:200]}")
-
-    def _get_default_prompt(self) -> str:
-        """获取默认提示词"""
-        return """你是小红书标题创作专家，擅长使用8大标题策略生成吸引人的标题：
-1. 痛点切入型
-2. 数字量化型
-3. 悬念钩子型
-4. 对比反转型
-5. 权威背书型
-6. 情绪共鸣型
-7. 教程攻略型
-8. 清单合集型
-
-请生成符合要求的标题。"""

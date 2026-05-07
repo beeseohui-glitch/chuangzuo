@@ -32,114 +32,120 @@ export function StepMaterial() {
     );
   }
 
+  const brand = materialPack.brand;
+  const product = materialPack.product;
+  const persona = materialPack.persona;
+  const scene = Array.isArray(materialPack.scene) ? materialPack.scene[0] : materialPack.scene;
+  const compliance = materialPack.compliance;
+
   const sections = [
     {
       icon: Building2,
       title: '品牌信息',
-      content: (
+      content: brand ? (
         <div className="space-y-2">
-          <p><span className="text-muted-foreground">品牌名称：</span>{materialPack.brand.name}</p>
+          <p><span className="text-muted-foreground">品牌名称：</span>{brand.name}</p>
           <div>
             <span className="text-muted-foreground">品牌调性：</span>
             <div className="mt-1 flex flex-wrap gap-1">
-              {materialPack.brand.tone.map((t) => (
+              {brand.tone?.map((t) => (
                 <Badge key={t} variant="secondary">{t}</Badge>
               ))}
             </div>
           </div>
-          {materialPack.brand.taboos.length > 0 && (
+          {brand.taboos && brand.taboos.length > 0 && (
             <div>
               <span className="text-muted-foreground">禁忌词：</span>
               <div className="mt-1 flex flex-wrap gap-1">
-                {materialPack.brand.taboos.map((t) => (
+                {brand.taboos.map((t) => (
                   <Badge key={t} variant="destructive">{t}</Badge>
                 ))}
               </div>
             </div>
           )}
         </div>
-      ),
+      ) : <p className="text-sm text-muted-foreground">暂无品牌信息</p>,
     },
     {
       icon: Package,
       title: '产品信息',
-      content: (
+      content: product ? (
         <div className="space-y-2">
-          <p><span className="text-muted-foreground">产品名称：</span>{materialPack.product.name}</p>
+          <p><span className="text-muted-foreground">产品名称：</span>{product.name}</p>
           <div>
             <span className="text-muted-foreground">核心卖点：</span>
             <ul className="mt-1 list-inside list-disc space-y-1">
-              {materialPack.product.selling_points.map((s) => (
+              {product.selling_points?.map((s) => (
                 <li key={s} className="text-sm">{s}</li>
               ))}
             </ul>
           </div>
-          {materialPack.product.ingredients.length > 0 && (
+          {product.ingredients && product.ingredients.length > 0 && (
             <div>
               <span className="text-muted-foreground">核心成分：</span>
               <div className="mt-1 flex flex-wrap gap-1">
-                {materialPack.product.ingredients.map((i) => (
+                {product.ingredients.map((i) => (
                   <Badge key={i} variant="outline">{i}</Badge>
                 ))}
               </div>
             </div>
           )}
         </div>
-      ),
+      ) : <p className="text-sm text-muted-foreground">暂无产品信息</p>,
     },
     {
       icon: Users,
       title: '人群画像',
-      content: (
+      content: persona ? (
         <div className="space-y-2">
-          <p><span className="text-muted-foreground">目标人群：</span>{materialPack.persona.profile}</p>
+          <p><span className="text-muted-foreground">目标人群：</span>{persona.profile}</p>
           <div>
             <span className="text-muted-foreground">痛点需求：</span>
             <ul className="mt-1 list-inside list-disc space-y-1">
-              {materialPack.persona.pain_points.map((p) => (
+              {persona.pain_points?.map((p) => (
                 <li key={p} className="text-sm">{p}</li>
               ))}
             </ul>
           </div>
-          <p><span className="text-muted-foreground">语言风格：</span>{materialPack.persona.language_style}</p>
+          <p><span className="text-muted-foreground">语言风格：</span>{persona.language_style}</p>
         </div>
-      ),
+      ) : <p className="text-sm text-muted-foreground">暂无人群画像</p>,
     },
     {
       icon: MapPin,
       title: '场景信息',
-      content: (
+      content: scene ? (
         <div className="space-y-2">
-          <p><span className="text-muted-foreground">使用场景：</span>{materialPack.scene.description}</p>
-          <p><span className="text-muted-foreground">使用方法：</span>{materialPack.scene.usage_method}</p>
+          <p><span className="text-muted-foreground">使用场景：</span>{scene.description}</p>
+          <p><span className="text-muted-foreground">使用方法：</span>{scene.usage_method}</p>
         </div>
-      ),
+      ) : <p className="text-sm text-muted-foreground">暂无场景信息</p>,
     },
     {
       icon: ShieldCheck,
       title: '合规信息',
-      content: (
+      content: compliance ? (
         <div className="space-y-2">
           <div>
             <span className="text-muted-foreground">合规规则：</span>
             <ul className="mt-1 list-inside list-disc space-y-1">
-              {materialPack.compliance.rules.map((r) => (
+              {compliance.rules?.map((r) => (
                 <li key={r} className="text-sm">{r}</li>
               ))}
             </ul>
           </div>
-          {materialPack.compliance.forbidden_groups.length > 0 && (
+          {compliance.forbidden_groups && compliance.forbidden_groups.length > 0 && (
             <div>
               <span className="text-muted-foreground">禁用人群：</span>
               <div className="mt-1 flex flex-wrap gap-1">
-                {materialPack.compliance.forbidden_groups.map((g) => (
+                {compliance.forbidden_groups.map((g) => (
                   <Badge key={g} variant="destructive">{g}</Badge>
                 ))}
               </div>
             </div>
           )}
         </div>
-      ),
+      ) : <p className="text-sm text-muted-foreground">暂无合规信息</p>,
     },
   ];
 

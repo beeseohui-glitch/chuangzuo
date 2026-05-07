@@ -1,31 +1,31 @@
 """
-Vector 工具 - pgvector 写入和检索
+向量工具 - pgvector 写入和语义检索
+匹配 knowledge_base 表结构（data_level / platform_category / enterprise_id）
 """
 
+import json
+import logging
 from typing import Optional
-import uuid
+
 import psycopg2
-from psycopg2.extras import execute_values
-from crewai.tools import BaseTool
-from pydantic import Field
+import psycopg2.extensions
+import psycopg2.extras
 
-from config import VectorStoreConfig, VectorIndexConfig, IndexType
+from config.vector_config import VectorStoreConfig
+
+logger = logging.getLogger(__name__)
 
 
-class VectorStoreTool(BaseTool):
-    """向量存储工具 - pgvector 操作"""
-
-    name: str = "vector_store"
-    description: str = "存储和检索知识库向量数据"
+class VectorStoreTool:
+    """向量存储工具 - pgvector 操作（兼容新表结构）"""
 
     def __init__(self, config: Optional[VectorStoreConfig] = None):
-        super().__init__()
         self.config = config or VectorStoreConfig()
         self._conn = None
 
     @property
-    def conn(self):
-        """数据库连接"""
+    def conn(self) -> psycopg2.extensions.connection:
+        """数据库连接（自动重连）"""
         if self._conn is None or self._conn.closed:
             self._conn = psycopg2.connect(
                 host=self.config.host,
@@ -34,210 +34,257 @@ class VectorStoreTool(BaseTool):
                 user=self.config.user,
                 password=self.config.password,
             )
+            self._conn.autocommit = False
         return self._conn
 
-    def _run(
+    def set_session_context(
         self,
-        text: str,
-        embedding: list[float],
-        enterprise_id: str,
-        category: str = "default",
-        metadata: Optional[dict] = None,
-    ) -> str:
+        enterprise_id: Optional[str] = None,
+        is_platform_admin: bool = False,
+        is_agent: bool = False,
+        user_role: Optional[str] = None,
+    ):
         """
-        BaseTool 接口 - 存储单个向量
+        设置 PostgreSQL 会话变量（RLS 上下文）
 
         Args:
-            text: 文本内容
-            embedding: 向量
             enterprise_id: 企业ID
-            category: 分类
-            metadata: 额外元数据
-
-        Returns:
-            str: 插入记录的ID
+            is_platform_admin: 是否平台管理员
+            is_agent: 是否 Agent 系统
+            user_role: 用户角色
         """
-        record_id = str(uuid.uuid4())
-        metadata_json = psycopg2.extras.Json(metadata or {})
+        # Rollback any failed transaction first
+        if self.conn.status != psycopg2.extensions.STATUS_READY:
+            self.conn.rollback()
 
         with self.conn.cursor() as cur:
-            cur.execute(
-                f"""
-                INSERT INTO {self.config.knowledge_table}
-                (id, enterprise_id, category, title, content, metadata, embedding)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    record_id,
-                    uuid.UUID(enterprise_id),
-                    category,
-                    text[:500],
-                    text,
-                    metadata_json,
-                    embedding,
-                ),
-            )
+            if enterprise_id:
+                cur.execute("SET app.enterprise_id = %s", (enterprise_id,))
+            else:
+                cur.execute("SET app.enterprise_id = ''")
+            cur.execute("SET app.is_platform_admin = %s", (str(is_platform_admin).lower(),))
+            cur.execute("SET app.is_agent = %s", (str(is_agent).lower(),))
+            cur.execute("SET app.user_role = %s", (user_role or "",))
             self.conn.commit()
 
+    def clear_session_context(self):
+        """清除会话上下文"""
+        with self.conn.cursor() as cur:
+            cur.execute("RESET app.enterprise_id")
+            cur.execute("RESET app.is_platform_admin")
+            cur.execute("RESET app.is_agent")
+            cur.execute("RESET app.user_role")
+            self.conn.commit()
+
+    def insert(
+        self,
+        title: str,
+        content: str,
+        embedding: list[float],
+        data_level: str = "tenant",
+        platform_category: Optional[str] = None,
+        enterprise_id: Optional[str] = None,
+        category: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+        metadata: Optional[dict] = None,
+        created_by: Optional[str] = None,
+    ) -> int:
+        """
+        写入单条知识到 pgvector
+
+        Args:
+            title: 标题
+            content: 内容
+            embedding: 1024 维向量
+            data_level: 'platform' 或 'tenant'
+            platform_category: 平台级分类 ('public'/'industry'/'template')
+            enterprise_id: 租户企业ID
+            category: 业务分类
+            tags: 标签列表
+            metadata: 元数据
+            created_by: 创建者
+
+        Returns:
+            int: 插入记录的 ID
+        """
+        sql = """
+            INSERT INTO knowledge_base
+                (data_level, platform_category, enterprise_id, category,
+                 title, content, tags, metadata, embedding, created_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::vector, %s)
+            RETURNING id
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(sql, (
+                data_level,
+                platform_category,
+                enterprise_id,
+                category,
+                title,
+                content,
+                json.dumps(tags or []),
+                json.dumps(metadata or {}),
+                str(embedding),
+                created_by,
+            ))
+            record_id = cur.fetchone()[0]
+            self.conn.commit()
         return record_id
 
     def batch_insert(
         self,
         records: list[dict],
-        enterprise_id: str,
-    ) -> list[str]:
+    ) -> list[int]:
         """
-        批量插入向量
+        批量写入知识
 
         Args:
-            records: 记录列表，每条记录包含 text, embedding, category, metadata
-            enterprise_id: 企业ID
+            records: 记录列表，每条包含 title, content, embedding 等字段
 
         Returns:
-            list[str]: 插入记录的ID列表
+            list[int]: 插入记录的 ID 列表
         """
+        if not records:
+            return []
+
         ids = []
-        values = []
-
-        for record in records:
-            record_id = str(uuid.uuid4())
-            ids.append(record_id)
-            values.append(
-                (
-                    record_id,
-                    uuid.UUID(enterprise_id),
-                    record.get("category", "default"),
-                    record["text"][:500],
-                    record["text"],
-                    psycopg2.extras.Json(record.get("metadata", {})),
-                    record["embedding"],
-                )
-            )
-
+        sql = """
+            INSERT INTO knowledge_base
+                (data_level, platform_category, enterprise_id, category,
+                 title, content, tags, metadata, embedding, created_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::vector, %s)
+            RETURNING id
+        """
         with self.conn.cursor() as cur:
-            execute_values(
-                cur,
-                f"""
-                INSERT INTO {self.config.knowledge_table}
-                (id, enterprise_id, category, title, content, metadata, embedding)
-                VALUES %s
-                """,
-                values,
-            )
+            for r in records:
+                cur.execute(sql, (
+                    r.get("data_level", "tenant"),
+                    r.get("platform_category"),
+                    r.get("enterprise_id"),
+                    r.get("category"),
+                    r["title"],
+                    r["content"],
+                    json.dumps(r.get("tags", [])),
+                    json.dumps(r.get("metadata", {})),
+                    str(r["embedding"]),
+                    r.get("created_by"),
+                ))
+                ids.append(cur.fetchone()[0])
             self.conn.commit()
-
         return ids
 
     def search(
         self,
         embedding: list[float],
-        enterprise_id: str,
-        limit: int = 10,
+        top_k: int = 10,
+        data_level: Optional[str] = None,
+        enterprise_id: Optional[str] = None,
+        platform_category: Optional[str] = None,
         category: Optional[str] = None,
-        min_similarity: float = 0.5,
+        min_similarity: float = 0.0,
     ) -> list[dict]:
         """
-        向量检索
+        语义搜索（使用内积操作符 <#>，向量已归一化）
 
         Args:
             embedding: 查询向量
-            enterprise_id: 企业ID
-            limit: 返回数量
-            category: 可选，限定分类
-            min_similarity: 最小相似度
+            top_k: 返回数量
+            data_level: 过滤数据级别
+            enterprise_id: 过滤企业ID
+            platform_category: 过滤平台分类
+            category: 过滤业务分类
+            min_similarity: 最小相似度阈值
 
         Returns:
-            list[dict]: 检索结果列表
+            list[dict]: 检索结果，包含 id, title, content, similarity 等
         """
-        if limit > self.config.search_config.max_limit:
-            limit = self.config.search_config.max_limit
+        if top_k > self.config.search_config.max_limit:
+            top_k = self.config.search_config.max_limit
 
-        category_filter = ""
-        params = [embedding, uuid.UUID(enterprise_id)]
+        conditions = []
+        condition_params = []
+
+        if data_level:
+            conditions.append("data_level = %s")
+            condition_params.append(data_level)
+
+        if enterprise_id:
+            conditions.append("enterprise_id = %s")
+            condition_params.append(enterprise_id)
+
+        if platform_category:
+            conditions.append("platform_category = %s")
+            condition_params.append(platform_category)
 
         if category:
-            category_filter = "AND category = %s"
-            params.append(category)
+            conditions.append("category = %s")
+            condition_params.append(category)
 
-        # 使用内积操作符（向量已归一化）
+        where_clause = " AND ".join(conditions) if conditions else "TRUE"
+
+        # 内积操作符 <#>：向量已归一化时，内积 = 余弦相似度
+        # <#> 返回的是负内积（越小越相似），所以用 -(<#>) 作为相似度分数
+        vec_str = str(embedding)
         sql = f"""
-            SELECT id, category, title, content, metadata,
-                   (embedding <=> %s::vector) as similarity
-            FROM {self.config.knowledge_table}
-            WHERE enterprise_id = %s {category_filter}
-              AND (embedding <=> %s::vector) < %s
+            SELECT id, data_level, platform_category, enterprise_id,
+                   category, title, content, tags, metadata, created_by,
+                   created_at, updated_at,
+                   -1 * (embedding <#> %s::vector) AS similarity
+            FROM knowledge_base
+            WHERE {where_clause}
+              AND -1 * (embedding <#> %s::vector) >= %s
             ORDER BY embedding <#> %s::vector
             LIMIT %s
         """
-        params.extend([1 - min_similarity, embedding, limit])
+        # 参数顺序：SELECT中的向量、WHERE条件参数、WHERE中的向量、min_similarity、ORDER BY中的向量、top_k
+        params = [vec_str] + condition_params + [vec_str, min_similarity, vec_str, top_k]
 
-        with self.conn.cursor() as cur:
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(sql, params)
             rows = cur.fetchall()
 
         results = []
         for row in rows:
-            results.append(
-                {
-                    "id": str(row[0]),
-                    "category": row[1],
-                    "title": row[2],
-                    "content": row[3],
-                    "metadata": row[4],
-                    "similarity": 1 - row[5],  # 转换为相似度
-                }
-            )
+            r = dict(row)
+            r["id"] = r["id"]
+            r["similarity"] = float(r["similarity"])
+            # 解析 JSON 字段
+            if isinstance(r.get("tags"), str):
+                r["tags"] = json.loads(r["tags"])
+            if isinstance(r.get("metadata"), str):
+                r["metadata"] = json.loads(r["metadata"])
+            results.append(r)
 
         return results
 
-    def delete(self, record_id: str, enterprise_id: str) -> bool:
-        """删除记录"""
+    def count(
+        self,
+        data_level: Optional[str] = None,
+        enterprise_id: Optional[str] = None,
+        platform_category: Optional[str] = None,
+    ) -> int:
+        """统计记录数"""
+        conditions = []
+        params = []
+
+        if data_level:
+            conditions.append("data_level = %s")
+            params.append(data_level)
+        if enterprise_id:
+            conditions.append("enterprise_id = %s")
+            params.append(enterprise_id)
+        if platform_category:
+            conditions.append("platform_category = %s")
+            params.append(platform_category)
+
+        where_clause = " AND ".join(conditions) if conditions else "TRUE"
+
         with self.conn.cursor() as cur:
-            cur.execute(
-                f"""
-                DELETE FROM {self.config.knowledge_table}
-                WHERE id = %s AND enterprise_id = %s
-                """,
-                (uuid.UUID(record_id), uuid.UUID(enterprise_id)),
-            )
-            self.conn.commit()
-            return cur.rowcount > 0
-
-    def create_index(self, index_type: IndexType = IndexType.IVFFLAT) -> str:
-        """
-        创建向量索引
-
-        Args:
-            index_type: 索引类型
-
-        Returns:
-            str: 执行结果
-        """
-        with self.conn.cursor() as cur:
-            if index_type == IndexType.IVFFLAT:
-                cur.execute(
-                    f"""
-                    CREATE INDEX IF NOT EXISTS idx_knowledge_base_embedding
-                    ON {self.config.knowledge_table}
-                    USING ivfflat (embedding vector_cosine_ops)
-                    WITH (lists = {self.config.index_config.lists})
-                    """
-                )
-            elif index_type == IndexType.HNSW:
-                cur.execute(
-                    f"""
-                    CREATE INDEX IF NOT EXISTS idx_knowledge_base_embedding
-                    ON {self.config.knowledge_table}
-                    USING hnsw (embedding vector_cosine_ops)
-                    WITH (m = {self.config.index_config.m}, ef_construction = {self.config.index_config.ef_construction})
-                    """
-                )
-            self.conn.commit()
-
-        return f"Index {index_type.value} created"
+            cur.execute(f"SELECT count(*) FROM knowledge_base WHERE {where_clause}", params)
+            return cur.fetchone()[0]
 
     def close(self):
         """关闭连接"""
-        if self._conn:
+        if self._conn and not self._conn.closed:
             self._conn.close()
             self._conn = None

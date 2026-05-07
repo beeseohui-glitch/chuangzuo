@@ -29,21 +29,21 @@ export type EnterpriseStatus = 'active' | 'suspended' | 'terminated';
 
 // 知识库相关类型
 export interface KnowledgeEntry {
-  id: number;
-  data_level: DataLevel;
-  platform_category: PlatformCategory | null;
-  enterprise_id: string | null;
-  category: string | null;
+  id: string;
+  data_level?: DataLevel;
+  platform_category?: PlatformCategory | null;
+  enterprise_id?: string | null;
+  category?: string | null;
   title: string;
   content: string;
-  source: string | null;
-  source_url: string | null;
-  tags: string[];
-  metadata: Record<string, unknown>;
-  created_by: string | null;
-  updated_by: string | null;
-  created_at: string;
-  updated_at: string;
+  source?: string | null;
+  source_url?: string | null;
+  tags?: string[];
+  metadata?: Record<string, unknown>;
+  created_by?: string | null;
+  updated_by?: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export type DataLevel = 'platform' | 'tenant';

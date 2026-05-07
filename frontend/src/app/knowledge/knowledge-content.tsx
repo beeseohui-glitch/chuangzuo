@@ -1,12 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { AppLayout } from '@/components/layout/app-layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { useKnowledgeList, useKnowledgeStats, useSearchKnowledge } from '@/hooks/use-knowledge';
+import {
+  useKnowledgeList, useKnowledgeStats, useSearchKnowledge,
+  useCreateKnowledge, useUpdateKnowledge, useDeleteKnowledge, useUploadKnowledge,
+} from '@/hooks/use-knowledge';
+import { useToast } from '@/components/ui/toast';
 import {
   BookOpen, Upload, Search, Plus, FolderOpen, FileText,
   Trash2, Edit3, X, ChevronRight, Database, Shield,
@@ -22,15 +26,39 @@ const CATEGORIES = [
   { id: 'compliance', name: '合规规则', icon: Shield },
 ];
 
+interface FormData {
+  title: string;
+  content: string;
+  category: string;
+  tags: string;
+}
+
+const EMPTY_FORM: FormData = { title: '', content: '', category: 'product', tags: '' };
+
 export default function KnowledgeContent() {
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showUpload, setShowUpload] = useState(false);
-  const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+
+  // Dialog state
+  const [showForm, setShowForm] = useState(false);
+  const [editingItem, setEditingItem] = useState<{ id: string } & FormData & { tags: string } | null>(null);
+  const [form, setForm] = useState<FormData>(EMPTY_FORM);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => toast(type, msg);
 
   const { data: items = [], isLoading } = useKnowledgeList(selectedCategory);
   const { data: stats } = useKnowledgeStats();
   const { data: searchResults } = useSearchKnowledge(searchQuery);
+
+  const createMutation = useCreateKnowledge();
+  const updateMutation = useUpdateKnowledge();
+  const deleteMutation = useDeleteKnowledge();
+  const uploadMutation = useUploadKnowledge();
 
   const displayItems = searchQuery.length > 0 ? searchResults : items;
 
@@ -38,6 +66,88 @@ export default function KnowledgeContent() {
     if (!stats?.by_category) return 0;
     if (id === 'all') return stats.total_entries || 0;
     return stats.by_category[id] || 0;
+  };
+
+  // Open create dialog
+  const handleAdd = () => {
+    setEditingItem(null);
+    setForm(EMPTY_FORM);
+    setShowForm(true);
+  };
+
+  // Open edit dialog
+  const handleEdit = (item: { id: string; title: string; content: string; category?: string | null; tags?: string[] }) => {
+    setEditingItem({
+      id: item.id,
+      title: item.title,
+      content: item.content,
+      category: item.category || 'product',
+      tags: item.tags?.join(', ') || '',
+    });
+    setForm({
+      title: item.title,
+      content: item.content,
+      category: item.category || 'product',
+      tags: item.tags?.join(', ') || '',
+    });
+    setShowForm(true);
+  };
+
+  // Submit create/edit
+  const handleSubmit = () => {
+    if (!form.title.trim() || !form.content.trim()) {
+      showToast('请填写标题和内容', 'error');
+      return;
+    }
+    const tags = form.tags.split(/[,，\s]+/).filter(Boolean);
+    const payload = { title: form.title, content: form.content, category: form.category, tags };
+
+    if (editingItem) {
+      updateMutation.mutate({ id: editingItem.id, data: payload }, {
+        onSuccess: () => {
+          showToast('更新成功');
+          setShowForm(false);
+          setEditingItem(null);
+        },
+        onError: () => showToast('更新失败', 'error'),
+      });
+    } else {
+      createMutation.mutate(payload, {
+        onSuccess: () => {
+          showToast('创建成功');
+          setShowForm(false);
+        },
+        onError: () => showToast('创建失败', 'error'),
+      });
+    }
+  };
+
+  // Delete
+  const handleDelete = (id: string) => {
+    deleteMutation.mutate(id, {
+      onSuccess: () => {
+        showToast('删除成功');
+        setDeleteTarget(null);
+        if (selectedItemId === id) setSelectedItemId(null);
+      },
+      onError: () => showToast('删除失败', 'error'),
+    });
+  };
+
+  // File upload
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    uploadMutation.mutate(formData, {
+      onSuccess: () => {
+        showToast('上传成功');
+        setShowUpload(false);
+      },
+      onError: () => showToast('上传失败', 'error'),
+    });
+    e.target.value = '';
   };
 
   return (
@@ -52,7 +162,7 @@ export default function KnowledgeContent() {
             <Button variant="outline" onClick={() => setShowUpload(!showUpload)}>
               <Upload className="mr-2 h-4 w-4" />上传知识
             </Button>
-            <Button><Plus className="mr-2 h-4 w-4" />新增条目</Button>
+            <Button onClick={handleAdd}><Plus className="mr-2 h-4 w-4" />新增条目</Button>
           </div>
         </div>
 
@@ -60,7 +170,22 @@ export default function KnowledgeContent() {
         {showUpload && (
           <Card className="border-dashed">
             <CardContent className="pt-6">
-              <div className="flex flex-col items-center justify-center py-8 space-y-3">
+              <div
+                className="flex flex-col items-center justify-center py-8 space-y-3"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const file = e.dataTransfer.files[0];
+                  if (file) {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    uploadMutation.mutate(formData, {
+                      onSuccess: () => { showToast('上传成功'); setShowUpload(false); },
+                      onError: () => showToast('上传失败', 'error'),
+                    });
+                  }
+                }}
+              >
                 <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted">
                   <Upload className="h-8 w-8 text-muted-foreground" />
                 </div>
@@ -69,7 +194,16 @@ export default function KnowledgeContent() {
                   <p className="text-sm text-muted-foreground mt-1">支持 .md、.txt、.docx 格式，单文件最大 10MB</p>
                 </div>
                 <div className="flex gap-2">
-                  <Button size="sm">选择文件</Button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".md,.txt,.docx"
+                    className="hidden"
+                    onChange={handleFileChange}
+                  />
+                  <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploadMutation.isPending}>
+                    {uploadMutation.isPending ? '上传中...' : '选择文件'}
+                  </Button>
                   <Button size="sm" variant="outline" onClick={() => setShowUpload(false)}>
                     <X className="mr-1 h-3.5 w-3.5" />取消
                   </Button>
@@ -152,7 +286,16 @@ export default function KnowledgeContent() {
                   className="pl-9"
                 />
               </div>
-              <Button variant="outline">语义搜索</Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (searchQuery.trim()) {
+                    // search is already reactive via useSearchKnowledge
+                  }
+                }}
+              >
+                语义搜索
+              </Button>
             </div>
 
             {isLoading ? (
@@ -197,8 +340,21 @@ export default function KnowledgeContent() {
                                 <span>来源：{item.source || '未知'}</span>
                               </div>
                               <div className="flex gap-2">
-                                <Button size="sm" variant="outline"><Edit3 className="mr-1 h-3.5 w-3.5" />编辑</Button>
-                                <Button size="sm" variant="outline" className="text-destructive hover:text-destructive"><Trash2 className="mr-1 h-3.5 w-3.5" />删除</Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={(e) => { e.stopPropagation(); handleEdit(item); }}
+                                >
+                                  <Edit3 className="mr-1 h-3.5 w-3.5" />编辑
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-destructive hover:text-destructive"
+                                  onClick={(e) => { e.stopPropagation(); setDeleteTarget(item.id); }}
+                                >
+                                  <Trash2 className="mr-1 h-3.5 w-3.5" />删除
+                                </Button>
                               </div>
                             </div>
                           ) : (
@@ -223,6 +379,85 @@ export default function KnowledgeContent() {
           </div>
         </div>
       </div>
+
+      {/* Create/Edit Dialog */}
+      {showForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowForm(false)}>
+          <div className="bg-background rounded-lg shadow-lg w-full max-w-lg mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold">{editingItem ? '编辑知识条目' : '新增知识条目'}</h2>
+              <Button variant="ghost" size="sm" onClick={() => setShowForm(false)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium mb-1 block">标题</label>
+                <Input
+                  value={form.title}
+                  onChange={(e) => setForm({ ...form, title: e.target.value })}
+                  placeholder="输入知识标题"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1 block">分类</label>
+                <select
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  value={form.category}
+                  onChange={(e) => setForm({ ...form, category: e.target.value })}
+                >
+                  {CATEGORIES.filter((c) => c.id !== 'all').map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1 block">内容</label>
+                <textarea
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm min-h-[120px] resize-y"
+                  value={form.content}
+                  onChange={(e) => setForm({ ...form, content: e.target.value })}
+                  placeholder="输入知识内容"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1 block">标签（逗号分隔）</label>
+                <Input
+                  value={form.tags}
+                  onChange={(e) => setForm({ ...form, tags: e.target.value })}
+                  placeholder="标签1, 标签2, 标签3"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <Button variant="outline" onClick={() => setShowForm(false)}>取消</Button>
+              <Button onClick={handleSubmit} disabled={createMutation.isPending || updateMutation.isPending}>
+                {(createMutation.isPending || updateMutation.isPending) ? '保存中...' : '保存'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setDeleteTarget(null)}>
+          <div className="bg-background rounded-lg shadow-lg w-full max-w-sm mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-bold mb-2">确认删除</h2>
+            <p className="text-sm text-muted-foreground mb-6">删除后无法恢复，确定要删除这条知识吗？</p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDeleteTarget(null)}>取消</Button>
+              <Button
+                variant="destructive"
+                onClick={() => handleDelete(deleteTarget)}
+                disabled={deleteMutation.isPending}
+              >
+                {deleteMutation.isPending ? '删除中...' : '删除'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppLayout>
   );
 }

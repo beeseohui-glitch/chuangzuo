@@ -104,7 +104,7 @@ class ComplianceCheckTool(BaseTool):
         result = self._run(title)
         result["title_length"] = len(title)
         result["in_range"] = (
-            self.config.min_title_length <= len(title) <= self.config.max_title_length
+            self._compliance_config.min_title_length <= len(title) <= self._compliance_config.max_title_length
         )
         return result
 
@@ -113,7 +113,7 @@ class ComplianceCheckTool(BaseTool):
         result = self._run(article)
         result["word_count"] = len(article)
         result["in_range"] = (
-            self.config.min_article_length <= len(article) <= self.config.max_article_length
+            self._compliance_config.min_article_length <= len(article) <= self._compliance_config.max_article_length
         )
         return result
 
@@ -132,7 +132,7 @@ class ComplianceCheckTool(BaseTool):
             "passed": len(issues) == 0,
             "issues": issues,
             "tag_count": len(tags),
-            "in_range": len(tags) <= self.config.max_tags,
+            "in_range": len(tags) <= self._compliance_config.max_tags,
         }
 
         return result

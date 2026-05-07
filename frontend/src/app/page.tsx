@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth-store';
+import { auth } from '@/lib/auth';
 
 export default function HomePage() {
   const router = useRouter();
@@ -15,7 +16,12 @@ export default function HomePage() {
   useEffect(() => {
     if (!isLoading) {
       if (isAuthenticated) {
-        router.push('/dashboard');
+        const user = auth.getUser();
+        if (user?.role === 'platform_admin' || user?.role === 'platform_operator') {
+          router.push('/admin');
+        } else {
+          router.push('/dashboard');
+        }
       } else {
         router.push('/login');
       }

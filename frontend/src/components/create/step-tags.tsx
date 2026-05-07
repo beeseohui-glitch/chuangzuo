@@ -16,10 +16,12 @@ import {
 
 export function StepTags() {
   const {
-    tags, customTag, complianceReport, complianceOverrides, isProcessing,
+    tags, customTag, complianceReport, complianceOverrides, taskStatus, isProcessing,
     toggleTag, addCustomTag, removeTag, setCustomTag,
-    setComplianceOverride, nextStep, prevStep,
+    setComplianceOverride, confirmP2Decision, nextStep, prevStep,
   } = useCreateStore();
+
+  const isAwaitingP2Decision = taskStatus === 'awaiting_p2_decision';
 
   if (isProcessing) {
     return (
@@ -125,19 +127,49 @@ export function StepTags() {
             ) : (
               <div className="space-y-4">
                 {/* P0 - 严重问题 */}
-                {complianceReport.p0_issues.length > 0 && (
-                  <IssueSection
-                    title="P0 严重问题（必须修改）"
-                    icon={<AlertCircle className="h-4 w-4 text-destructive" />}
-                    issues={complianceReport.p0_issues}
-                    overrides={complianceOverrides}
-                    onOverride={setComplianceOverride}
-                    variant="destructive"
-                  />
+                {complianceReport.p0_issues?.length > 0 && (
+                  <div className="space-y-3">
+                    <IssueSection
+                      title="P0 严重问题（必须修改）"
+                      icon={<AlertCircle className="h-4 w-4 text-destructive" />}
+                      issues={complianceReport.p0_issues}
+                      overrides={complianceOverrides}
+                      onOverride={setComplianceOverride}
+                      variant="destructive"
+                    />
+                    {/* P0 决策区域 */}
+                    {isAwaitingP2Decision && (
+                      <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+                        <p className="text-sm font-medium text-destructive mb-3">
+                          检测到严重合规问题，请选择处理方式：
+                        </p>
+                        <div className="flex gap-3">
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => confirmP2Decision(false)}
+                            disabled={isProcessing}
+                          >
+                            <X className="mr-1 h-4 w-4" />
+                            拒绝发布
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => confirmP2Decision(true)}
+                            disabled={isProcessing}
+                          >
+                            <Check className="mr-1 h-4 w-4" />
+                            忽略问题继续
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 {/* P1 - 重要问题 */}
-                {complianceReport.p1_issues.length > 0 && (
+                {complianceReport.p1_issues?.length > 0 && (
                   <IssueSection
                     title="P1 重要问题（建议修改）"
                     icon={<AlertTriangle className="h-4 w-4 text-yellow-500" />}
@@ -149,7 +181,7 @@ export function StepTags() {
                 )}
 
                 {/* P2 - 轻微问题 */}
-                {complianceReport.p2_issues.length > 0 && (
+                {complianceReport.p2_issues?.length > 0 && (
                   <IssueSection
                     title="P2 轻微问题"
                     icon={<Info className="h-4 w-4 text-blue-500" />}
@@ -161,7 +193,7 @@ export function StepTags() {
                 )}
 
                 {/* 建议 */}
-                {complianceReport.suggestions.length > 0 && (
+                {complianceReport.suggestions?.length > 0 && (
                   <div className="rounded-lg bg-muted p-3">
                     <Label className="text-xs text-muted-foreground">优化建议</Label>
                     <ul className="mt-2 space-y-1">
@@ -176,9 +208,9 @@ export function StepTags() {
                 )}
 
                 {/* 全部通过 */}
-                {complianceReport.p0_issues.length === 0 &&
-                  complianceReport.p1_issues.length === 0 &&
-                  complianceReport.p2_issues.length === 0 && (
+                {(complianceReport.p0_issues?.length || 0) === 0 &&
+                  (complianceReport.p1_issues?.length || 0) === 0 &&
+                  (complianceReport.p2_issues?.length || 0) === 0 && (
                   <div className="flex flex-col items-center py-6 text-green-500">
                     <CheckCircle2 className="h-12 w-12" />
                     <p className="mt-2 font-medium">全部通过</p>
@@ -192,12 +224,12 @@ export function StepTags() {
 
       {/* 操作按钮 */}
       <div className="flex items-center justify-between">
-        <Button variant="outline" onClick={prevStep}>
+        <Button variant="outline" onClick={prevStep} disabled={isAwaitingP2Decision}>
           <ArrowLeft className="mr-2 h-4 w-4" />
           上一步
         </Button>
-        <Button onClick={nextStep} disabled={tags.length === 0}>
-          下一步
+        <Button onClick={nextStep} disabled={tags.length === 0 || isAwaitingP2Decision || isProcessing}>
+          {isProcessing ? '处理中...' : '下一步'}
           <ArrowRight className="ml-2 h-4 w-4" />
         </Button>
       </div>

@@ -6,18 +6,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useEnterpriseQuota } from '@/hooks/use-user';
 import { useKnowledgeStats } from '@/hooks/use-knowledge';
+import { useAnalyticsOverview } from '@/hooks/use-analytics';
 import {
   PenLine, BookOpen, BarChart3, TrendingUp,
   ArrowRight, Sparkles, Clock, CheckCircle2, AlertCircle,
 } from 'lucide-react';
 import Link from 'next/link';
-
-const RECENT_CREATIONS = [
-  { id: '1', title: '护肝片｜打工人的必备好物', platform: '小红书', aiScore: 82, compliance: 'passed' as const, time: '2小时前' },
-  { id: '2', title: '用了褪黑素之后，我的睡眠变了', platform: '小红书', aiScore: 75, compliance: 'passed' as const, time: '昨天' },
-  { id: '3', title: '维生素C测评｜真实体验分享', platform: '小红书', aiScore: 68, compliance: 'needs_revision' as const, time: '3天前' },
-  { id: '4', title: '为什么我推荐益生菌？', platform: '小红书', aiScore: 79, compliance: 'passed' as const, time: '5天前' },
-];
 
 const QUICK_PLATFORMS = [
   { id: 'xiaohongshu', name: '小红书笔记', icon: '小', color: 'bg-red-100 text-red-600 dark:bg-red-900/20', desc: '图文笔记，8大标题策略', available: true },
@@ -28,9 +22,22 @@ const QUICK_PLATFORMS = [
 export default function DashboardContent() {
   const { data: quota } = useEnterpriseQuota();
   const { data: kbStats } = useKnowledgeStats();
+  const { data: analytics } = useAnalyticsOverview();
 
   const quotaData = quota || { used: 2, monthly_limit: 5, reset_date: '2026-06-01' };
   const kbCount = kbStats?.total_entries || 0;
+
+  const recentCreations = analytics?.recent_notes?.map((note) => ({
+    id: note.id,
+    title: note.title,
+    platform: note.platform,
+    aiScore: note.ai_score,
+    compliance: note.compliance as 'passed' | 'needs_revision' | 'failed',
+    time: note.date,
+  })) || [];
+
+  const totalNotes = analytics?.total_notes || quotaData.used;
+  const avgAiScore = analytics?.avg_ai_score || 76;
 
   const complianceBadge = (status: string) => {
     if (status === 'passed') return <Badge variant="default" className="bg-green-500/10 text-green-500 border-green-500/20">通过</Badge>;
@@ -55,7 +62,7 @@ export default function DashboardContent() {
               <PenLine className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{quotaData.used}</div>
+              <div className="text-2xl font-bold">{totalNotes}</div>
               <p className="text-xs text-muted-foreground">剩余 {quotaData.monthly_limit - quotaData.used} 篇额度</p>
             </CardContent>
           </Card>
@@ -75,7 +82,7 @@ export default function DashboardContent() {
               <BarChart3 className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">76</div>
+              <div className="text-2xl font-bold">{avgAiScore}</div>
               <p className="text-xs text-muted-foreground"><span className="text-green-500">+3</span> 较上周</p>
             </CardContent>
           </Card>
@@ -145,8 +152,8 @@ export default function DashboardContent() {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {RECENT_CREATIONS.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between rounded-lg border p-3 hover:bg-accent/30 transition-colors">
+                {recentCreations.slice(0, 4).map((item) => (
+                  <Link key={item.id} href={`/notes/${item.id}`} className="flex items-center justify-between rounded-lg border p-3 hover:bg-accent/30 transition-colors">
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm truncate">{item.title}</p>
                       <div className="flex items-center gap-3 mt-1">
@@ -161,7 +168,7 @@ export default function DashboardContent() {
                       </div>
                       {complianceBadge(item.compliance)}
                     </div>
-                  </div>
+                  </Link>
                 ))}
               </div>
             </CardContent>

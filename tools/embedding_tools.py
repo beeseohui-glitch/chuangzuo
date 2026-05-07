@@ -6,7 +6,7 @@ from typing import Optional
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from crewai.tools import BaseTool
-from pydantic import Field
+from pydantic import Field, PrivateAttr
 
 from config import EmbeddingConfig
 
@@ -16,11 +16,9 @@ class LocalEmbeddingTool(BaseTool):
 
     name: str = "local_embedding"
     description: str = "将文本转换为1024维向量向量，用于语义检索"
+    config: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
 
-    def __init__(self, config: Optional[EmbeddingConfig] = None):
-        super().__init__()
-        self.config = config or EmbeddingConfig()
-        self._model: Optional[SentenceTransformer] = None
+    _model: Optional[SentenceTransformer] = PrivateAttr(default=None)
 
     @property
     def model(self) -> SentenceTransformer:
