@@ -20,11 +20,9 @@ def _make_cos_client(secret_id: str, secret_key: str, region: str) -> CosS3Clien
     return CosS3Client(config)
 
 
-class COSUploadTool(BaseTool):
-    """COS 上传工具"""
+class COSBaseTool(BaseTool):
+    """COS 工具基类 - 共享字段和客户端初始化"""
 
-    name: str = "cos_upload"
-    description: str = "上传文件到腾讯云COS对象存储"
     secret_id: str = Field(default_factory=lambda: os.getenv("COS_SECRET_ID", ""))
     secret_key: str = Field(default_factory=lambda: os.getenv("COS_SECRET_KEY", ""))
     region: str = Field(default_factory=lambda: os.getenv("COS_REGION", "ap-guangzhou"))
@@ -41,6 +39,13 @@ class COSUploadTool(BaseTool):
         if self._client is None:
             self._client = _make_cos_client(self.secret_id, self.secret_key, self.region)
         return self._client
+
+
+class COSUploadTool(COSBaseTool):
+    """COS 上传工具"""
+
+    name: str = "cos_upload"
+    description: str = "上传文件到腾讯云COS对象存储"
 
     def _run(
         self,
@@ -79,27 +84,11 @@ class COSUploadTool(BaseTool):
         return self.upload_bytes(text.encode("utf-8"), cos_path, bucket)
 
 
-class COSDownloadTool(BaseTool):
+class COSDownloadTool(COSBaseTool):
     """COS 下载工具"""
 
     name: str = "cos_download"
     description: str = "从腾讯云COS对象存储下载文件"
-    secret_id: str = Field(default_factory=lambda: os.getenv("COS_SECRET_ID", ""))
-    secret_key: str = Field(default_factory=lambda: os.getenv("COS_SECRET_KEY", ""))
-    region: str = Field(default_factory=lambda: os.getenv("COS_REGION", "ap-guangzhou"))
-    bucket: str = Field(default_factory=lambda: os.getenv("COS_BUCKET", ""))
-
-    _client: Optional[CosS3Client] = PrivateAttr(default=None)
-
-    def model_post_init(self, __context) -> None:
-        if self.secret_id and self.secret_key:
-            self._client = _make_cos_client(self.secret_id, self.secret_key, self.region)
-
-    @property
-    def client(self) -> CosS3Client:
-        if self._client is None:
-            self._client = _make_cos_client(self.secret_id, self.secret_key, self.region)
-        return self._client
 
     def _run(
         self,
@@ -127,27 +116,11 @@ class COSDownloadTool(BaseTool):
         return self.download_bytes(cos_path, bucket).decode("utf-8")
 
 
-class COSDeleteTool(BaseTool):
+class COSDeleteTool(COSBaseTool):
     """COS 删除工具"""
 
     name: str = "cos_delete"
     description: str = "从腾讯云COS对象存储删除文件"
-    secret_id: str = Field(default_factory=lambda: os.getenv("COS_SECRET_ID", ""))
-    secret_key: str = Field(default_factory=lambda: os.getenv("COS_SECRET_KEY", ""))
-    region: str = Field(default_factory=lambda: os.getenv("COS_REGION", "ap-guangzhou"))
-    bucket: str = Field(default_factory=lambda: os.getenv("COS_BUCKET", ""))
-
-    _client: Optional[CosS3Client] = PrivateAttr(default=None)
-
-    def model_post_init(self, __context) -> None:
-        if self.secret_id and self.secret_key:
-            self._client = _make_cos_client(self.secret_id, self.secret_key, self.region)
-
-    @property
-    def client(self) -> CosS3Client:
-        if self._client is None:
-            self._client = _make_cos_client(self.secret_id, self.secret_key, self.region)
-        return self._client
 
     def _run(self, cos_path: str, bucket: Optional[str] = None) -> bool:
         bucket_name = bucket or self.bucket

@@ -2,8 +2,7 @@
 
 import { cn } from '@/lib/utils';
 import { Loader2, CheckCircle2, XCircle, Clock } from 'lucide-react';
-
-export type AgentStatusType = 'idle' | 'running' | 'completed' | 'failed';
+import { AgentStatusType } from '@/types';
 
 interface AgentStatusProps {
   status: AgentStatusType;

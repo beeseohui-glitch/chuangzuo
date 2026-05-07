@@ -109,28 +109,16 @@ class EmbeddingCache:
     """Embedding 结果缓存"""
 
     def __init__(self, ttl_seconds: int = 1800):
-        self._cache: dict[str, tuple[list[float], float]] = {}
-        self._ttl = ttl_seconds
+        from tools.cache_tools import TTLCache
+        self._cache = TTLCache(ttl_seconds)
 
     def get(self, text: str) -> Optional[list[float]]:
         """获取缓存的 embedding"""
-        import time
-
-        if text not in self._cache:
-            return None
-
-        embedding, timestamp = self._cache[text]
-        if time.time() - timestamp > self._ttl:
-            del self._cache[text]
-            return None
-
-        return embedding
+        return self._cache.get(text)
 
     def set(self, text: str, embedding: list[float]):
         """设置缓存"""
-        import time
-
-        self._cache[text] = (embedding, time.time())
+        self._cache.put(text, embedding)
 
     def clear(self):
         """清空缓存"""

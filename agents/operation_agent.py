@@ -2,18 +2,14 @@
 运营 Agent - 内容运营专家
 """
 
-import json
-import os
-from pathlib import Path
 from typing import Optional
 from datetime import datetime, timedelta
 
 from crewai import Agent
-from crewai.llm import LLM
 from crewai.tools import BaseTool
 from pydantic import BaseModel
 
-from config import LLMConfig
+from config import LLMManagerConfig
 
 
 class PublishScheduleItem(BaseModel):
@@ -32,15 +28,19 @@ class OperationOutput(BaseModel):
     content_matrix: dict[str, int]
 
 
+from tools.prompt_tools import prompt_manager
+from tools.crewai_llm import create_llm
+
+
 class OperationAgent:
     """内容运营Agent"""
 
     def __init__(
         self,
-        llm_config: Optional[LLMConfig] = None,
+        llm_config: Optional[LLMManagerConfig] = None,
         tools: Optional[list[BaseTool]] = None,
     ):
-        self.llm_config = llm_config
+        self._llm_config = llm_config
         self.tools = tools or []
         self._agent: Optional[Agent] = None
 
@@ -48,25 +48,14 @@ class OperationAgent:
     def agent(self) -> Agent:
         """获取 CrewAI Agent 实例"""
         if self._agent is None:
-            prompt_path = Path("prompts/operation_agent.md")
-            if prompt_path.exists():
-                with open(prompt_path, "r", encoding="utf-8") as f:
-                    self._prompt_template = f.read()
-            else:
-                self._prompt_template = self._get_default_prompt()
-
+            prompt = prompt_manager.load_prompt("operation_agent")
             self._agent = Agent(
                 role="内容运营专家",
                 goal="制定发布计划、优化运营策略、提升内容表现",
-                backstory=self._prompt_template,
+                backstory=prompt,
                 tools=self.tools,
                 verbose=True,
-                llm=LLM(
-                    model="openai/MiniMax-M2.7",
-                    api_key=os.getenv("MINIMAX_API_KEY", ""),
-                    api_base=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.chat/v1"),
-                    llm_type="litellm",
-                ),
+                llm=create_llm(self._llm_config),
             )
         return self._agent
 
@@ -194,8 +183,3 @@ class OperationAgent:
             matrix[f"{platform}_count"] = platform_counts.get(platform, 0)
 
         return matrix
-
-    def _get_default_prompt(self) -> str:
-        """获取默认提示词"""
-        return """你是内容运营专家，擅长制定发布计划、优化运营策略、提升内容表现。
-核心能力：发布计划制定、运营策略优化、内容矩阵规划、跨平台协同"""

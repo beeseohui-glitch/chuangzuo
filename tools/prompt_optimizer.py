@@ -5,25 +5,15 @@ Prompt优化工具 - 去AI味/Prompt迭代
 from typing import Optional
 import re
 
+from validators.ai_flavor_scorer import AIFlavorScorer
+
 
 class PromptOptimizer:
     """Prompt优化器"""
 
     def __init__(self):
-        self._ai_patterns = [
-            r"首先",
-            r"其次",
-            r"最后",
-            r"总之",
-            r"综上所述",
-            r"值得注意的是",
-            r"毫无疑问",
-            r"从某种意义上",
-            r"从整体上看",
-            r"可以说",
-            r"众所周知",
-            r"不言而喻",
-        ]
+        # 复用 AIFlavorScorer 的 AI 结构模式列表作为权威来源
+        self._ai_patterns = AIFlavorScorer.AI_STRUCTURES
 
         self._formal_patterns = [
             r"具有",

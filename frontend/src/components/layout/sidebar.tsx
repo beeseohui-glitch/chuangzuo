@@ -7,11 +7,6 @@ import { useSidebarStore } from '@/stores/sidebar-store';
 import { useUserStore } from '@/stores/user-store';
 import { useIsDesktop } from '@/hooks/use-media-query';
 import {
-  LayoutDashboard,
-  PenLine,
-  BookOpen,
-  BarChart3,
-  Settings,
   ChevronLeft,
   ChevronRight,
   Sparkles,
@@ -20,14 +15,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { UsageQuota } from '@/components/shared/usage-quota';
-
-const navItems = [
-  { title: '工作台', href: '/dashboard', icon: LayoutDashboard },
-  { title: '创作中心', href: '/create', icon: PenLine },
-  { title: '知识库', href: '/knowledge', icon: BookOpen },
-  { title: '数据看板', href: '/analytics', icon: BarChart3 },
-  { title: '设置', href: '/settings', icon: Settings },
-];
+import { NAV_ITEMS } from '@/lib/nav-items';
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -67,7 +55,7 @@ export function Sidebar() {
       <ScrollArea className="flex-1 py-2">
         <nav className="space-y-1 px-2">
           <TooltipProvider delay={0}>
-            {navItems.map((item) => {
+            {NAV_ITEMS.map((item) => {
               const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
               const Icon = item.icon;
 

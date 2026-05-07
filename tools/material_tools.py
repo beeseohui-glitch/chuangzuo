@@ -35,6 +35,8 @@ logger = logging.getLogger(__name__)
 # 缓存 TTL（秒）
 CACHE_TTL = 1800  # 30 分钟
 
+from tools.cache_tools import TTLCache
+
 
 class MaterialSearchTool(BaseTool):
     """素材检索工具 - 三层知识库语义检索"""
@@ -53,7 +55,7 @@ class MaterialSearchTool(BaseTool):
         super().__init__()
         self._vector_store = vector_store
         self._embedding_tool = embedding_tool
-        self._cache: dict[str, tuple[dict, float]] = {}
+        self._cache = TTLCache(CACHE_TTL)
 
     @property
     def vector_store(self) -> VectorStoreTool:
@@ -451,16 +453,14 @@ class MaterialSearchTool(BaseTool):
 
     def _get_cached(self, key: str) -> Optional[MaterialPack]:
         """获取缓存"""
-        if key in self._cache:
-            data, ts = self._cache[key]
-            if time.time() - ts < CACHE_TTL:
-                return MaterialPack(**data)
-            del self._cache[key]
+        data = self._cache.get(key)
+        if data is not None:
+            return MaterialPack(**data)
         return None
 
     def _put_cache(self, key: str, pack: MaterialPack):
         """写入缓存"""
-        self._cache[key] = (pack.model_dump(), time.time())
+        self._cache.put(key, pack.model_dump())
 
     def clear_cache(self):
         """清空缓存"""

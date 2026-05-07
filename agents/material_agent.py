@@ -3,16 +3,19 @@
 """
 
 import json
-import os
-from pathlib import Path
+import logging
 from typing import Optional
 
 from crewai import Agent
-from crewai.llm import LLM
 from crewai.tools import BaseTool
 
-from config import MATERIAL_SEARCH_AGENT, LLMConfig
+from config import MATERIAL_SEARCH_AGENT, LLMManagerConfig
 from models import MaterialPack, BrandInfo, ProductInfo, PersonaInfo, SceneInfo, ComplianceRules
+from tools.prompt_tools import prompt_manager
+from tools.crewai_llm import create_llm
+from tools.llm_tools import LLMResponseParser
+
+logger = logging.getLogger(__name__)
 
 
 class MaterialAgent:
@@ -20,11 +23,11 @@ class MaterialAgent:
 
     def __init__(
         self,
-        llm_config: Optional[LLMConfig] = None,
+        llm_config: Optional[LLMManagerConfig] = None,
         tools: Optional[list[BaseTool]] = None,
     ):
         self.config = MATERIAL_SEARCH_AGENT
-        self.llm_config = llm_config
+        self._llm_config = llm_config
         self.tools = tools or []
         self._agent: Optional[Agent] = None
 
@@ -32,39 +35,16 @@ class MaterialAgent:
     def agent(self) -> Agent:
         """获取 CrewAI Agent 实例"""
         if self._agent is None:
-            prompt_path = Path(self.config.prompt_file)
-            if prompt_path.exists():
-                with open(prompt_path, "r", encoding="utf-8") as f:
-                    self._prompt_template = f.read()
-            else:
-                self._prompt_template = self._get_default_prompt()
-
+            prompt = prompt_manager.load_prompt("material_search")
             self._agent = Agent(
                 role="知识库检索专家",
                 goal="从知识库检索相关素材并组装素材包",
-                backstory=self._prompt_template,
+                backstory=prompt,
                 tools=self.tools,
                 verbose=True,
-                llm=LLM(
-                    model="openai/MiniMax-M2.7",
-                    api_key=os.getenv("MINIMAX_API_KEY", ""),
-                    api_base=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.chat/v1"),
-                    llm_type="litellm",
-                ),
+                llm=create_llm(self._llm_config),
             )
         return self._agent
-
-    @property
-    def _llm(self):
-        """获取 LLM 配置"""
-        if self.llm_config:
-            return self.llm_config
-        from openai import OpenAI
-        import os
-        return OpenAI(
-            api_key=os.getenv("MINIMAX_API_KEY", ""),
-            api_base=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.chat/v1"),
-        )
 
     def search(
         self,
@@ -91,11 +71,22 @@ class MaterialAgent:
 
         try:
             content = response.content if hasattr(response, "content") else str(response)
-            return self._parse_response(content)
-        except Exception as e:
+            data = LLMResponseParser.parse_json(content)
+
+            brand = BrandInfo(**data["brand"]) if data.get("brand") else None
+            product = ProductInfo(**data["product"]) if data.get("product") else None
+            persona = PersonaInfo(**data["persona"]) if data.get("persona") else None
+            scenes = [SceneInfo(**s) for s in data.get("scene", [])]
+            compliance = ComplianceRules(**data["compliance"]) if data.get("compliance") else None
+
             return MaterialPack(
-                missing_fields=["检索失败"],
+                brand=brand, product=product, persona=persona,
+                scene=scenes, compliance=compliance,
+                missing_fields=data.get("missing_fields", []),
             )
+        except Exception as e:
+            logger.error(f"Material search failed: {e}")
+            return MaterialPack(missing_fields=["检索失败"])
 
     def _build_prompt(
         self,
@@ -146,47 +137,3 @@ class MaterialAgent:
 """
 
         return prompt
-
-    def _parse_response(self, content: str) -> MaterialPack:
-        """解析响应"""
-        start = content.find("{")
-        end = content.rfind("}") + 1
-
-        if start != -1 and end != 0:
-            json_str = content[start:end]
-            data = json.loads(json_str)
-
-            # 构建 MaterialPack
-            brand = None
-            if data.get("brand"):
-                brand = BrandInfo(**data["brand"])
-
-            product = None
-            if data.get("product"):
-                product = ProductInfo(**data["product"])
-
-            persona = None
-            if data.get("persona"):
-                persona = PersonaInfo(**data["persona"])
-
-            scenes = [SceneInfo(**s) for s in data.get("scene", [])]
-
-            compliance = None
-            if data.get("compliance"):
-                compliance = ComplianceRules(**data["compliance"])
-
-            return MaterialPack(
-                brand=brand,
-                product=product,
-                persona=persona,
-                scene=scenes,
-                compliance=compliance,
-                missing_fields=data.get("missing_fields", []),
-            )
-
-        raise ValueError(f"Cannot parse MaterialPack from response: {content[:200]}")
-
-    def _get_default_prompt(self) -> str:
-        """获取默认提示词"""
-        return """你是知识库检索专家，擅长从三层知识库中检索最相关的素材。
-检索优先级：企业私有库 > 行业知识库 > 公共知识库"""

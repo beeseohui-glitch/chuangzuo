@@ -2,17 +2,16 @@
 公众号文章 Agent - 公众号内容创作专家
 """
 
-import json
-import os
-from pathlib import Path
 from typing import Optional
 
 from crewai import Agent
-from crewai.llm import LLM
 from crewai.tools import BaseTool
 
-from config import LLMConfig, WechatPublicConfig
+from config import LLMManagerConfig, WechatPublicConfig
 from models import WechatArticle, PublicAccountContent
+from tools.prompt_tools import prompt_manager
+from tools.crewai_llm import create_llm
+from tools.llm_tools import LLMResponseParser
 
 
 class WechatArticleAgent:
@@ -20,11 +19,11 @@ class WechatArticleAgent:
 
     def __init__(
         self,
-        llm_config: Optional[LLMConfig] = None,
+        llm_config: Optional[LLMManagerConfig] = None,
         platform_config: Optional[WechatPublicConfig] = None,
         tools: Optional[list[BaseTool]] = None,
     ):
-        self.llm_config = llm_config
+        self._llm_config = llm_config
         self.platform_config = platform_config or WechatPublicConfig()
         self.tools = tools or []
         self._agent: Optional[Agent] = None
@@ -33,25 +32,14 @@ class WechatArticleAgent:
     def agent(self) -> Agent:
         """获取 CrewAI Agent 实例"""
         if self._agent is None:
-            prompt_path = Path("prompts/wechat_article_agent.md")
-            if prompt_path.exists():
-                with open(prompt_path, "r", encoding="utf-8") as f:
-                    self._prompt_template = f.read()
-            else:
-                self._prompt_template = self._get_default_prompt()
-
+            prompt = prompt_manager.load_prompt("wechat_article_agent")
             self._agent = Agent(
                 role="公众号内容创作专家",
                 goal="创作符合公众号风格的深度文章",
-                backstory=self._prompt_template,
+                backstory=prompt,
                 tools=self.tools,
                 verbose=True,
-                llm=LLM(
-                    model="openai/MiniMax-M2.7",
-                    api_key=os.getenv("MINIMAX_API_KEY", ""),
-                    api_base=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.chat/v1"),
-                    llm_type="litellm",
-                ),
+                llm=create_llm(self._llm_config),
             )
         return self._agent
 
@@ -78,7 +66,7 @@ class WechatArticleAgent:
 
         try:
             content = response.content if hasattr(response, "content") else str(response)
-            article_data = self._parse_response(content)
+            article_data = LLMResponseParser.parse_json(content)
 
             # 确保title存在
             if 'title' not in article_data:
@@ -140,19 +128,3 @@ class WechatArticleAgent:
 {{"title": "标题", "subtitle": "副标题（可选）", "content": "正文HTML", "summary": "摘要", "tags": ["标签1", "标签2"]}}
 """
 
-    def _parse_response(self, content: str) -> dict:
-        """解析响应"""
-        start = content.find("{")
-        end = content.rfind("}") + 1
-
-        if start != -1 and end != 0:
-            json_str = content[start:end]
-            return json.loads(json_str)
-
-        raise ValueError(f"Cannot parse WechatArticle from response: {content[:200]}")
-
-    def _get_default_prompt(self) -> str:
-        """获取默认提示词"""
-        return """你是公众号内容创作专家，擅长撰写符合微信公众号风格的深度文章。
-平台特点：深度内容、专业调性、结构清晰、排版考究
-正文结构：开头痛点引入 → 核心论点展开 → 总结行动号召"""

@@ -243,7 +243,7 @@ src/
 | Agent | 文件 | 状态 |
 |-------|------|------|
 | 统一调度 Agent | agents/orchestrator_agent.py | 已完成 — 意图识别 + 平台路由 + 注入检测 + 限流 |
-| 素材检索 Tool | tools/material_tools.py | 已完成 — 三层检索 + 素材包组装 + 30min缓存 |
+| 素材检索 Tool | tools/material_tools.py | 已完成 — 三层检索 + 灵活提取（关键词匹配）+ 30min缓存 |
 | 标题 Agent | agents/title_agent.py | 已完成 — 8大策略 + 标题数量校验 + 相似度去重 |
 | 正文 Agent | agents/article_agent.py | 已完成 — AI味评分重试 + 段落结构检查 |
 | 标签 Agent | agents/tag_agent.py | 已完成 — 5层策略 + 数量校验 + #前缀自动修复 |
@@ -328,7 +328,7 @@ src/
 | 布局 | AppLayout + Sidebar（响应式overlay）+ Header + BottomNav | 已完成 |
 | 登录页 | 双账号登录（租户/管理员）+ 角色路由 + 分栏品牌展示 | 已完成 |
 | 工作台 | 统计卡片 + 快速开始 + 最近创作 + 趋势图 + 额度 | 已完成 |
-| 创作中心 | 6步流程（输入→素材→标题→正文→标签→输出）+ 实时预览 | 已完成 |
+| 创作中心 | 6步流程（输入→素材→标题→正文→标签→输出）+ WebSocket 实时交互 + 合规决策 UI | 已完成 |
 | 知识库 | 分类树 + 搜索 + CRUD + 上传区域 + 语义搜索按钮 | 已完成 |
 | 数据看板 | recharts图表 + 选题排名 + 策略对比 + 优化建议 | 已完成 |
 | 设置 | 个人资料 + 企业信息 + LLM模型配置 | 已完成 |
@@ -370,6 +370,78 @@ src/
 - `use-knowledge.ts`：分页响应提取、POST 搜索、string ID
 - `use-analytics.ts`：后端响应映射、移除不存在的 `useRecommendations`
 - `use-admin.ts`：拆分 public/industry 端点、字段名映射、string ID
+
+### 创作流程交互逻辑（2026-05-07 修复）
+
+**问题**：前端只处理 `completed`/`failed` 消息，忽略后端发送的所有中间消息，导致流程卡在素材确认环节。
+
+**修复方案**：前端适配后端的交互式流程。
+
+**WebSocket 消息类型：**
+| 消息类型 | 含义 | 前端处理 |
+|----------|------|----------|
+| `progress` | 进度更新 | 保持 loading 状态 |
+| `material_ready` | 素材已检索 | 更新 materialPack，停止 loading |
+| `awaiting_title_selection` | 等待选择标题 | 更新 titleOptions，显示标题选择 UI |
+| `title_selected` | 标题已选择 | 显示 loading，等待正文生成 |
+| `article_ready` | 正文已生成 | 更新 article 和 aiScore |
+| `compliance_issues` | 有合规问题 | 显示决策 UI（接受/拒绝） |
+| `completed` | 流程完成 | 显示最终结果 |
+| `failed` | 流程失败 | 显示错误信息 |
+
+**前端关键修改（create-store.ts）：**
+- WebSocket handler 添加对所有中间消息的处理
+- 新增 `selectTitle(titleIndex)` 方法：调用后端 `/select-title` 接口
+- 新增 `confirmP2Decision(accept)` 方法：调用后端 `/p2-decision` 接口
+
+**前端组件修改：**
+- `step-material.tsx`：添加对 Optional 字段的防护检查（brand/product/persona/scene/compliance 可能为 null）
+- `step-title.tsx`：选择标题后调用 `selectTitle()` 通知后端继续
+- `step-tags.tsx`：P0 问题时显示决策 UI，调用 `confirmP2Decision()`
+
+**后端交互点（flow_runner.py）：**
+1. 标题选择：发送 `awaiting_title_selection` → 等待 `title_event`（5分钟超时，自动选第一个）
+2. P2 决策：发送 `compliance_issues` → 等待 `p2_event`（5分钟超时，自动接受）
+
+### 素材检索优化（2026-05-07）
+
+**问题**：知识库数据分类与代码期望不匹配（无 brand/product/scene 分类），导致素材缺失。
+
+**修复方案**：两步提取策略。
+
+```python
+# 1. 优先从对应 category 提取
+brand_entries = by_category.get("brand", [])
+
+# 2. 如果没有，从所有结果中按关键词匹配
+if not brand_entries:
+    all_entries = [e for entries in by_category.values() for e in entries]
+    brand_entries = [
+        e for e in all_entries
+        if any(kw in e.get("title", "") + e.get("content", "")
+               for kw in ["品牌", "公司", "企业", "调性"])
+    ]
+
+# 3. 兜底处理（返回默认值而非 None）
+if not brand_entries:
+    return BrandInfo(name=product_name, tone=[], taboos=[])
+```
+
+**关键词映射：**
+| 提取方法 | 匹配关键词 |
+|----------|-----------|
+| `_extract_brand` | 品牌、公司、企业、调性 |
+| `_extract_product` | 产品、卖点、成分、功效、特点 |
+| `_extract_persona` | 人群、画像、用户、目标、痛点、需求 |
+| `_extract_scenes` | 场景、使用、用法、时机 |
+| `_extract_compliance` | 合规、规则、禁忌、禁止、注意 |
+
+**修改文件：**
+- `tools/material_tools.py`：所有 `_extract_*` 方法添加两步提取 + 兜底处理
+- `frontend/src/stores/create-store.ts`：WebSocket handler + 交互方法
+- `frontend/src/components/create/step-material.tsx`：Optional 字段防护
+- `frontend/src/components/create/step-title.tsx`：标题选择通知后端
+- `frontend/src/components/create/step-tags.tsx`：P0 决策 UI
 
 ### 后端API现状
 

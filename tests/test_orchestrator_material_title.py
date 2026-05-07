@@ -284,9 +284,10 @@ class TestMaterialSearchTool:
     def test_cache_put_get(self):
         """测试缓存存取"""
         from tools.material_tools import MaterialSearchTool
+        from tools.cache_tools import TTLCache
 
         tool = MaterialSearchTool.__new__(MaterialSearchTool)
-        tool._cache = {}
+        tool._cache = TTLCache(1800)
 
         pack = MaterialPack(
             brand=BrandInfo(name="测试品牌"),
@@ -303,15 +304,19 @@ class TestMaterialSearchTool:
     def test_cache_expiry(self):
         """测试缓存过期"""
         from tools.material_tools import MaterialSearchTool, CACHE_TTL
+        from tools.cache_tools import TTLCache
 
         tool = MaterialSearchTool.__new__(MaterialSearchTool)
-        tool._cache = {}
+        # 使用极短 TTL 模拟过期
+        tool._cache = TTLCache(ttl_seconds=0)
 
         pack = MaterialPack(brand=BrandInfo(name="test"))
         key = "test_key"
 
-        # 写入缓存，手动设置时间为过去
-        tool._cache[key] = (pack.model_dump(), time.time() - CACHE_TTL - 1)
+        # 写入缓存（TTL=0 立即过期）
+        tool._put_cache(key, pack)
+        import time
+        time.sleep(0.01)
 
         cached = tool._get_cached(key)
         assert cached is None

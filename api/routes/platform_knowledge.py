@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from api.db import get_db_conn
 from api.deps import require_platform_admin, UserInfo
+from api.utils import row_to_dict
 
 router = APIRouter(prefix="/api/v1/platform", tags=["平台管理"])
 
@@ -52,21 +53,7 @@ class ComplianceWordCreate(BaseModel):
     suggestion: str = ""
 
 
-def _row_to_dict(row) -> dict:
-    d = dict(row)
-    if "tags" in d and isinstance(d["tags"], str):
-        d["tags"] = json.loads(d["tags"])
-    if "metadata" in d and isinstance(d["metadata"], str):
-        d["metadata"] = json.loads(d["metadata"])
-    for key in ("created_at", "updated_at"):
-        if key in d and d[key] is not None and not isinstance(d[key], str):
-            d[key] = d[key].isoformat()
-    if "id" in d:
-        d["id"] = str(d["id"])
-    return d
-
-
-def _compliance_row_to_dict(row) -> dict:
+def _compliancerow_to_dict(row) -> dict:
     """compliance_rules 行转为前端格式（level→severity, description→suggestion）"""
     d = dict(row)
     for key in ("created_at", "updated_at"):
@@ -113,7 +100,7 @@ async def list_public(
             *params, page_size, offset,
         )
 
-    return {"items": [_row_to_dict(r) for r in rows], "total": count_row["cnt"], "page": page}
+    return {"items": [row_to_dict(r) for r in rows], "total": count_row["cnt"], "page": page}
 
 
 @router.post("/knowledge/public", status_code=201)
@@ -128,7 +115,7 @@ async def create_public(
             req.category, req.title, req.content,
             json.dumps(req.tags, ensure_ascii=False), user.user_id,
         )
-    return _row_to_dict(row)
+    return row_to_dict(row)
 
 
 @router.put("/knowledge/public/{item_id}")
@@ -146,7 +133,7 @@ async def update_public(
         )
     if not row:
         raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "条目不存在"})
-    return _row_to_dict(row)
+    return row_to_dict(row)
 
 
 @router.delete("/knowledge/public/{item_id}")
@@ -195,7 +182,7 @@ async def list_industry(
 
     items = []
     for r in rows:
-        d = _row_to_dict(r)
+        d = row_to_dict(r)
         # 从 metadata 中提取 industry 字段到顶层
         meta = d.get("metadata") or {}
         d["industry"] = meta.get("industry", "")
@@ -217,7 +204,7 @@ async def create_industry(
             req.category, req.title, req.content,
             json.dumps(req.tags, ensure_ascii=False), metadata, user.user_id,
         )
-    d = _row_to_dict(row)
+    d = row_to_dict(row)
     d["industry"] = req.industry
     return d
 
@@ -238,7 +225,7 @@ async def update_industry(
         )
     if not row:
         raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "条目不存在"})
-    d = _row_to_dict(row)
+    d = row_to_dict(row)
     d["industry"] = req.industry
     return d
 
@@ -282,7 +269,7 @@ async def list_templates(
 
     items = []
     for r in rows:
-        d = _row_to_dict(r)
+        d = row_to_dict(r)
         # 前端模板用 name 字段，DB 用 title
         d["name"] = d.get("title", "")
         d["platform"] = d.get("category", "")
@@ -302,7 +289,7 @@ async def create_template(
             "VALUES ('platform', 'template', $1, $2, $3, $4) RETURNING *",
             req.platform, req.name, req.content, user.user_id,
         )
-    d = _row_to_dict(row)
+    d = row_to_dict(row)
     d["name"] = d.get("title", "")
     d["platform"] = d.get("category", "")
     return d
@@ -322,7 +309,7 @@ async def update_template(
         )
     if not row:
         raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "模板不存在"})
-    d = _row_to_dict(row)
+    d = row_to_dict(row)
     d["name"] = d.get("title", "")
     d["platform"] = d.get("category", "")
     return d
@@ -365,7 +352,7 @@ async def list_compliance(
     async with get_db_conn(is_platform_admin=True, user_role="platform_admin") as conn:
         rows = await conn.fetch(f"SELECT * FROM compliance_rules WHERE {where} ORDER BY id", *params)
 
-    return {"items": [_compliance_row_to_dict(r) for r in rows], "total": len(rows)}
+    return {"items": [_compliancerow_to_dict(r) for r in rows], "total": len(rows)}
 
 
 @router.post("/compliance", status_code=201)
@@ -378,7 +365,7 @@ async def create_compliance(
             "INSERT INTO compliance_rules (word, level, category, description) VALUES ($1, $2, $3, $4) RETURNING *",
             req.word, req.severity.upper(), req.category, req.suggestion,
         )
-    return _compliance_row_to_dict(row)
+    return _compliancerow_to_dict(row)
 
 
 @router.put("/compliance/{item_id}")
@@ -395,7 +382,7 @@ async def update_compliance(
         )
     if not row:
         raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "合规词不存在"})
-    return _compliance_row_to_dict(row)
+    return _compliancerow_to_dict(row)
 
 
 @router.delete("/compliance/{item_id}")

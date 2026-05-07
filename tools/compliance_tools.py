@@ -10,6 +10,34 @@ from pydantic import Field
 from config import XiaohongshuConfig, PlatformType
 
 
+# ── 共享违禁词常量 ─────────────────────────────────────────
+
+# 广告法绝对化用语
+ABSOLUTE_WORDS = [
+    "最", "第一", "顶级", "绝对", "100%", "全网", "独家", "首发",
+    "最好", "最强", "无敌", "完美", "极致", "绝无仅有", "独一无二",
+    "nex", "首", "之最",
+]
+
+# 医疗用语
+MEDICAL_WORDS = [
+    "治疗", "治愈", "疗效", "疗效最好", "药到病除", "根治",
+    "预防疾病", "治疗疾病", "消炎", "止痛", "退烧", "降压",
+    "减肥", "增肥", "美白", "祛斑", "祛痘", "生发",
+]
+
+# 保健品行业特殊违禁词
+HEALTHCARE_PROHIBITED = [
+    "特效", "神效", "奇效", "灵丹", "妙药", "偏方", "秘方",
+    "增高", "壮阳", "滋阴", "补肾", "活血", "化瘀",
+]
+
+# 通用违禁词
+GENERAL_PROHIBITED = [
+    "最", "第一", "顶级", "绝对", "100%", "全网", "独家", "首发",
+]
+
+
 class ComplianceCheckTool(BaseTool):
     """合规检查工具 - 检测敏感词和违禁内容"""
 
@@ -24,25 +52,9 @@ class ComplianceCheckTool(BaseTool):
     def _compile_patterns(self):
         """编译违禁词正则表达式"""
         patterns = {}
-
-        # 广告法违禁词
-        absolute_words = [
-            "最", "第一", "顶级", "绝对", "100%", "全网", "独家", "首发",
-            "最好", "最强", "无敌", "完美", "极致", "绝无仅有", "独一无二",
-            "nex", "首", "之最", "极致",
-        ]
-
-        # 医疗用语
-        medical_words = [
-            "治疗", "治愈", "疗效", "疗效最好", "药到病除", "根治",
-            "预防疾病", "治疗疾病", "消炎", "止痛", "退烧", "降压",
-            "减肥", "增肥", "美白", "祛斑", "祛痘", "生发",
-        ]
-
-        patterns["absolute"] = self._build_pattern(absolute_words)
-        patterns["medical"] = self._build_pattern(medical_words)
+        patterns["absolute"] = self._build_pattern(ABSOLUTE_WORDS)
+        patterns["medical"] = self._build_pattern(MEDICAL_WORDS)
         patterns["prohibited"] = self._build_pattern(self._compliance_config.prohibited_words)
-
         return patterns
 
     def _build_pattern(self, words: list[str]) -> re.Pattern:
@@ -145,24 +157,13 @@ class ComplianceCheckTool(BaseTool):
 class ProhibitedWordDetector:
     """违禁词检测器 - 基于规则的简单实现"""
 
-    # 保健品行业特殊违禁词
-    HEALTHCARE_PROHIBITED = [
-        "特效", "神效", "奇效", "灵丹", "妙药", "偏方", "秘方",
-        "增高", "壮阳", "滋阴", "补肾", "活血", "化瘀",
-    ]
-
-    # 通用违禁词
-    GENERAL_PROHIBITED = [
-        "最", "第一", "顶级", "绝对", "100%", "全网", "独家", "首发",
-    ]
-
     def __init__(self):
         self._patterns = None
 
     @property
     def patterns(self) -> re.Pattern:
         if self._patterns is None:
-            all_words = self.HEALTHCARE_PROHIBITED + self.GENERAL_PROHIBITED
+            all_words = HEALTHCARE_PROHIBITED + GENERAL_PROHIBITED
             escaped = [re.escape(w) for w in all_words]
             self._patterns = re.compile("|".join(escaped))
         return self._patterns

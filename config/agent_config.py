@@ -17,15 +17,6 @@ class AgentType(str, Enum):
     OPERATION = "operation"
 
 
-class Platform(str, Enum):
-    """目标平台"""
-    XIAOHONGSHU = "xiaohongshu"
-    WECHAT_PUBLIC = "wechat_public"
-    DOUYIN = "douyin"
-    WEIBO = "weibo"
-    VIDEO号 = "video_number"
-
-
 class AgentSettings(BaseModel):
     """单个 Agent 设置"""
     name: str = Field(description="Agent 名称")

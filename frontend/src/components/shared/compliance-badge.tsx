@@ -2,8 +2,9 @@
 
 import { cn } from '@/lib/utils';
 import { CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
+import type { ComplianceStatus } from '@/types';
 
-export type ComplianceStatusType = 'passed' | 'needs_revision' | 'failed';
+export type ComplianceStatusType = ComplianceStatus;
 
 interface ComplianceBadgeProps {
   status: ComplianceStatusType;
@@ -13,7 +14,7 @@ interface ComplianceBadgeProps {
 }
 
 const statusConfig: Record<
-  ComplianceStatusType,
+  string,
   { icon: typeof CheckCircle2; label: string; className: string }
 > = {
   passed: {
@@ -24,6 +25,11 @@ const statusConfig: Record<
   needs_revision: {
     icon: AlertTriangle,
     label: '需修改',
+    className: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
+  },
+  has_issues: {
+    icon: AlertTriangle,
+    label: '有问题',
     className: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
   },
   failed: {
@@ -39,6 +45,8 @@ const STATUS_MAP: Record<string, ComplianceStatusType> = {
   'passed': 'passed',
   '需修改': 'needs_revision',
   'needs_revision': 'needs_revision',
+  '有问题': 'has_issues',
+  'has_issues': 'has_issues',
   '不合规': 'failed',
   'failed': 'failed',
 };

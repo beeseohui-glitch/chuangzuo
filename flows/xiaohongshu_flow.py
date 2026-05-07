@@ -139,31 +139,16 @@ class XiaohongshuFlow(Flow):
         topic = material_pack.product.name if material_pack.product else "产品推荐"
         material_dict = material_pack.model_dump()
 
-        for attempt in range(MAX_STEP_RETRIES + 1):
-            result = self.crew.title_agent.generate(
+        result = self._retry_with_degradation(
+            step_name="title_generation",
+            action=lambda: self.crew.title_agent.generate(
                 topic=topic,
                 material_pack=material_dict,
                 historical_titles=None,
-            )
-
-            validation = self.validator.validate_title_output(result)
-
-            if validation.passed:
-                self._title_output = result
-                return result
-
-            # 重试
-            if attempt < MAX_STEP_RETRIES:
-                self._increment_retries("title_generation")
-                logger.warning(
-                    f"标题校验失败，重试 ({attempt+1}/{MAX_STEP_RETRIES})"
-                )
-                continue
-
-        # 降级：接受当前标题 + 警告
-        self._warnings.append("标题校验未通过，建议人工优化")
-        self._degraded = True
-        self._degradation_reason = self._degradation_reason or "标题质量不达标"
+            ),
+            should_accept=lambda r: (self.validator.validate_title_output(r).passed, r),
+            degrade_reason="标题质量不达标",
+        )
         self._title_output = result
         return result
 
@@ -252,27 +237,18 @@ class XiaohongshuFlow(Flow):
         if not note_output.article:
             return self._quality_result(note_output, None, True)
 
-        brand_taboos = (
-            self._material_pack.brand.taboos
-            if self._material_pack and self._material_pack.brand
-            else []
-        )
-
         for attempt in range(MAX_STEP_RETRIES + 1):
-            # 合规检查
             compliance_report = self.crew.compliance_agent.check(
                 title=self._selected_title or "",
                 article=note_output.article,
                 tags=note_output.tags or [],
-                brand_taboos=brand_taboos,
+                brand_taboos=self._brand_taboos,
             )
 
-            # 无P0问题，通过
             if not compliance_report.has_p0_issues:
                 self._compliance_report = compliance_report
                 return self._quality_result(note_output, compliance_report, False)
 
-            # 重试：重新生成正文
             if attempt < MAX_STEP_RETRIES:
                 self._increment_retries("quality_evaluation")
                 logger.warning(
@@ -287,7 +263,7 @@ class XiaohongshuFlow(Flow):
                 )
                 self._note_output = note_output
 
-        # 降级：接受当前版本 + 合规问题清单
+        # 降级
         p0_contents = [issue.content for issue in compliance_report.p0_issues]
         self._warnings.append(
             f"合规P0问题未修复，需人工修改: {', '.join(p0_contents)}"
@@ -325,16 +301,11 @@ class XiaohongshuFlow(Flow):
         # 最终合规检查（如果之前没有合规报告或有P0问题，重新检查）
         compliance_report = quality_result.get("compliance_report")
         if compliance_report is None or compliance_report.has_p0_issues:
-            brand_taboos = (
-                self._material_pack.brand.taboos
-                if self._material_pack and self._material_pack.brand
-                else []
-            )
             compliance_report = self.crew.compliance_agent.check(
                 title=self._selected_title or "",
                 article=note_output.article,
                 tags=tags,
-                brand_taboos=brand_taboos,
+                brand_taboos=self._brand_taboos,
             )
             self._compliance_report = compliance_report
 
@@ -358,37 +329,7 @@ class XiaohongshuFlow(Flow):
         tags = result.get("tags") or self._tags
         compliance_report = result.get("compliance_report") or self._compliance_report
 
-        # 构造空的合规报告（如果缺失）
-        if compliance_report is None:
-            compliance_report = ComplianceReport(
-                status=ComplianceStatus.PASSED,
-                checked_at=datetime.now().isoformat(),
-                suggestions=["未执行合规检查"],
-            )
-
-        metadata = NoteMetadata(
-            platform="xiaohongshu",
-            enterprise_id=getattr(self._material_pack, "enterprise_id", None)
-            if self._material_pack
-            else None,
-            created_at=datetime.now().isoformat(),
-            retry_count=self._total_retries,
-            llm_used="MiniMax-M2.7",
-            warnings=self._warnings.copy(),
-            degraded=self._degraded,
-            degradation_reason=self._degradation_reason,
-        )
-
-        return NotePack(
-            title=self._selected_title or (note_output.title if note_output else ""),
-            article=note_output.article if note_output else "",
-            paragraphs=note_output.paragraphs if note_output else [],
-            tags=tags,
-            ai_flavor_score=note_output.ai_flavor_score if note_output else 0,
-            compliance_report=compliance_report,
-            material_pack=self._material_pack,
-            metadata=metadata,
-        )
+        return self._build_note_pack(note_output, tags, compliance_report)
 
     # ── 公共入口 ───────────────────────────────────────────
 
@@ -419,6 +360,84 @@ class XiaohongshuFlow(Flow):
             return self._assemble_from_state()
 
     # ── 内部方法 ───────────────────────────────────────────
+
+    @property
+    def _brand_taboos(self) -> list[str]:
+        """获取品牌禁忌词列表"""
+        if self._material_pack and self._material_pack.brand:
+            return self._material_pack.brand.taboos
+        return []
+
+    def _retry_with_degradation(
+        self,
+        step_name: str,
+        action,
+        should_accept,
+        degrade_reason: str,
+    ):
+        """
+        通用重试降级方法
+
+        Args:
+            step_name: 步骤名（用于日志和重试计数）
+            action: 无参可调用对象，返回要评估的结果
+            should_accept: 接受结果的可调用对象，返回 (accepted: bool, result)
+            degrade_reason: 降级原因
+        """
+        last_result = None
+        for attempt in range(MAX_STEP_RETRIES + 1):
+            result = action()
+            last_result = result
+
+            accepted, checked_result = should_accept(result)
+            if accepted:
+                return checked_result
+
+            if attempt < MAX_STEP_RETRIES:
+                self._increment_retries(step_name)
+                logger.warning(
+                    f"{step_name} 校验失败，重试 ({attempt+1}/{MAX_STEP_RETRIES})"
+                )
+                continue
+
+        # 降级
+        self._warnings.append(f"{degrade_reason}，建议人工优化")
+        self._degraded = True
+        self._degradation_reason = self._degradation_reason or degrade_reason
+        return last_result
+
+    def _build_note_pack(self, note_output: Optional[NoteOutput], tags: list[str], compliance_report: Optional[ComplianceReport]) -> NotePack:
+        """组装 NotePack（final_output 和 _assemble_from_state 共用）"""
+        if compliance_report is None:
+            compliance_report = ComplianceReport(
+                status=ComplianceStatus.PASSED,
+                checked_at=datetime.now().isoformat(),
+                suggestions=["未执行合规检查"],
+            )
+
+        metadata = NoteMetadata(
+            platform="xiaohongshu",
+            enterprise_id=getattr(self._material_pack, "enterprise_id", None)
+            if self._material_pack
+            else None,
+            created_at=datetime.now().isoformat(),
+            retry_count=self._total_retries,
+            llm_used="MiniMax-M2.7",
+            warnings=self._warnings.copy(),
+            degraded=self._degraded,
+            degradation_reason=self._degradation_reason,
+        )
+
+        return NotePack(
+            title=self._selected_title or (note_output.title if note_output else ""),
+            article=note_output.article if note_output else "",
+            paragraphs=note_output.paragraphs if note_output else [],
+            tags=tags,
+            ai_flavor_score=note_output.ai_flavor_score if note_output else 0,
+            compliance_report=compliance_report,
+            material_pack=self._material_pack,
+            metadata=metadata,
+        )
 
     def _reset_state(self):
         """重置流程状态"""
@@ -467,35 +486,4 @@ class XiaohongshuFlow(Flow):
 
     def _assemble_from_state(self) -> NotePack:
         """从当前状态组装 NotePack（异常恢复用）"""
-        compliance_report = self._compliance_report
-        if compliance_report is None:
-            compliance_report = ComplianceReport(
-                status=ComplianceStatus.PASSED,
-                checked_at=datetime.now().isoformat(),
-                suggestions=["未执行合规检查"],
-            )
-
-        metadata = NoteMetadata(
-            platform="xiaohongshu",
-            enterprise_id=getattr(self._material_pack, "enterprise_id", None)
-            if self._material_pack
-            else None,
-            created_at=datetime.now().isoformat(),
-            retry_count=self._total_retries,
-            llm_used="MiniMax-M2.7",
-            warnings=self._warnings.copy(),
-            degraded=self._degraded,
-            degradation_reason=self._degradation_reason,
-        )
-
-        note = self._note_output
-        return NotePack(
-            title=self._selected_title or (note.title if note else ""),
-            article=note.article if note else "",
-            paragraphs=note.paragraphs if note else [],
-            tags=self._tags,
-            ai_flavor_score=note.ai_flavor_score if note else 0,
-            compliance_report=compliance_report,
-            material_pack=self._material_pack,
-            metadata=metadata,
-        )
+        return self._build_note_pack(self._note_output, self._tags, self._compliance_report)

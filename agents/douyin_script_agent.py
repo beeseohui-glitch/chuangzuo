@@ -2,17 +2,16 @@
 抖音脚本 Agent - 抖音短视频脚本专家
 """
 
-import json
-import os
-from pathlib import Path
 from typing import Optional
 
 from crewai import Agent
-from crewai.llm import LLM
 from crewai.tools import BaseTool
 
-from config import LLMConfig, DouyinConfig
+from config import LLMManagerConfig, DouyinConfig
 from models import DouyinScript, DouyinVideo, DouyinContent
+from tools.prompt_tools import prompt_manager
+from tools.crewai_llm import create_llm
+from tools.llm_tools import LLMResponseParser
 
 
 class DouyinScriptAgent:
@@ -20,11 +19,11 @@ class DouyinScriptAgent:
 
     def __init__(
         self,
-        llm_config: Optional[LLMConfig] = None,
+        llm_config: Optional[LLMManagerConfig] = None,
         platform_config: Optional[DouyinConfig] = None,
         tools: Optional[list[BaseTool]] = None,
     ):
-        self.llm_config = llm_config
+        self._llm_config = llm_config
         self.platform_config = platform_config or DouyinConfig()
         self.tools = tools or []
         self._agent: Optional[Agent] = None
@@ -33,25 +32,14 @@ class DouyinScriptAgent:
     def agent(self) -> Agent:
         """获取 CrewAI Agent 实例"""
         if self._agent is None:
-            prompt_path = Path("prompts/douyin_script_agent.md")
-            if prompt_path.exists():
-                with open(prompt_path, "r", encoding="utf-8") as f:
-                    self._prompt_template = f.read()
-            else:
-                self._prompt_template = self._get_default_prompt()
-
+            prompt = prompt_manager.load_prompt("douyin_script_agent")
             self._agent = Agent(
                 role="抖音短视频脚本专家",
                 goal="创作吸引眼球的短视频脚本",
-                backstory=self._prompt_template,
+                backstory=prompt,
                 tools=self.tools,
                 verbose=True,
-                llm=LLM(
-                    model="openai/MiniMax-M2.7",
-                    api_key=os.getenv("MINIMAX_API_KEY", ""),
-                    api_base=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.chat/v1"),
-                    llm_type="litellm",
-                ),
+                llm=create_llm(self._llm_config),
             )
         return self._agent
 
@@ -78,7 +66,7 @@ class DouyinScriptAgent:
 
         try:
             content = response.content if hasattr(response, "content") else str(response)
-            script_data = self._parse_response(content)
+            script_data = LLMResponseParser.parse_json(content)
 
             script = DouyinScript(
                 title=script_data.get("title", topic),
@@ -151,19 +139,3 @@ class DouyinScriptAgent:
 {{"title": "标题", "hooks": "开场钩子", "script_content": "主体脚本", "cta": "行动号召", "duration_seconds": {duration_seconds}, "visual_suggestions": ["建议1", "建议2"], "hashtags": ["#话题1", "#话题2"]}}
 """
 
-    def _parse_response(self, content: str) -> dict:
-        """解析响应"""
-        start = content.find("{")
-        end = content.rfind("}") + 1
-
-        if start != -1 and end != 0:
-            json_str = content[start:end]
-            return json.loads(json_str)
-
-        raise ValueError(f"Cannot parse DouyinScript from response: {content[:200]}")
-
-    def _get_default_prompt(self) -> str:
-        """获取默认提示词"""
-        return """你是抖音短视频脚本专家，擅长创作吸引眼球的短视频脚本。
-平台特点：15秒-3分钟、开场钩子、节奏紧凑、行动号召
-脚本结构：5秒开场钩子 → 15-45秒主体 → 5-10秒结尾CTA"""

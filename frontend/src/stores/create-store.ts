@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Platform, TaskStatus, MaterialPack, TitleOption, NoteOutput, ComplianceReport } from '@/types';
+import { Platform, TaskStatus, MaterialPack, TitleOption, NoteOutput, ComplianceReport, AgentStatusType } from '@/types';
 import { createApi } from '@/lib/api';
 
 export type CreateStep = 'input' | 'material' | 'title' | 'article' | 'tags' | 'output';
@@ -9,8 +9,6 @@ export interface StepStatus {
   label: string;
   status: 'pending' | 'active' | 'completed' | 'error';
 }
-
-export type AgentStatusType = 'idle' | 'running' | 'completed' | 'failed';
 
 export interface AgentState {
   name: string;

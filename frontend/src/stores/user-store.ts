@@ -1,11 +1,7 @@
 import { create } from 'zustand';
-import { Enterprise, PlanType } from '@/types';
+import { Enterprise, PlanType, EnterpriseQuota } from '@/types';
 
-interface UsageQuota {
-  monthly_limit: number;
-  used: number;
-  reset_date: string;
-}
+type UsageQuota = EnterpriseQuota;
 
 interface UserStore {
   enterprise: Enterprise | null;

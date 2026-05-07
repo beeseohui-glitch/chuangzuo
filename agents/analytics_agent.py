@@ -2,17 +2,14 @@
 数据分析 Agent - 数据分析专家
 """
 
-import json
-import os
-from pathlib import Path
+import logging
 from typing import Optional
 from datetime import datetime, timedelta
 
 from crewai import Agent
-from crewai.llm import LLM
 from crewai.tools import BaseTool
 
-from config import LLMConfig
+from config import LLMManagerConfig
 from models import (
     AnalyticsData,
     ContentStats,
@@ -20,6 +17,10 @@ from models import (
     ContentPerformance,
     TrendData,
 )
+from tools.prompt_tools import prompt_manager
+from tools.crewai_llm import create_llm
+
+logger = logging.getLogger(__name__)
 
 
 class AnalyticsAgent:
@@ -27,10 +28,10 @@ class AnalyticsAgent:
 
     def __init__(
         self,
-        llm_config: Optional[LLMConfig] = None,
+        llm_config: Optional[LLMManagerConfig] = None,
         tools: Optional[list[BaseTool]] = None,
     ):
-        self.llm_config = llm_config
+        self._llm_config = llm_config
         self.tools = tools or []
         self._agent: Optional[Agent] = None
 
@@ -38,25 +39,14 @@ class AnalyticsAgent:
     def agent(self) -> Agent:
         """获取 CrewAI Agent 实例"""
         if self._agent is None:
-            prompt_path = Path("prompts/analytics_agent.md")
-            if prompt_path.exists():
-                with open(prompt_path, "r", encoding="utf-8") as f:
-                    self._prompt_template = f.read()
-            else:
-                self._prompt_template = self._get_default_prompt()
-
+            prompt = prompt_manager.load_prompt("analytics_agent")
             self._agent = Agent(
                 role="数据分析专家",
                 goal="从数据中提取洞察并生成可操作的建议",
-                backstory=self._prompt_template,
+                backstory=prompt,
                 tools=self.tools,
                 verbose=True,
-                llm=LLM(
-                    model="openai/MiniMax-M2.7",
-                    api_key=os.getenv("MINIMAX_API_KEY", ""),
-                    api_base=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.chat/v1"),
-                    llm_type="litellm",
-                ),
+                llm=create_llm(self._llm_config),
             )
         return self._agent
 
@@ -208,8 +198,3 @@ class AnalyticsAgent:
             recommendations.append("数据表现良好，继续保持当前创作策略")
 
         return recommendations
-
-    def _get_default_prompt(self) -> str:
-        """获取默认提示词"""
-        return """你是数据分析专家，擅长从数据中提取洞察并生成可操作的建议。
-核心能力：数据统计分析、内容表现分析、趋势识别、优化建议生成"""

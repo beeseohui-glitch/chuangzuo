@@ -119,6 +119,16 @@ class P2DecisionRequest(BaseModel):
 # ── 接口 ──────────────────────────────────────────────────
 
 
+def _get_owned_task(task_id: str, user: UserInfo) -> TaskRecord:
+    """获取任务并校验所有权"""
+    task = _tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "任务不存在"})
+    if task.user_id != user.user_id:
+        raise HTTPException(status_code=403, detail={"error": "FORBIDDEN", "message": "无权访问该任务"})
+    return task
+
+
 @router.post("/start")
 async def start_creation(
     req: CreateStartRequest,
@@ -158,11 +168,7 @@ async def get_task_status(
     user: UserInfo = Depends(require_tenant),
 ):
     """查询任务状态"""
-    task = _tasks.get(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "任务不存在"})
-    if task.user_id != user.user_id:
-        raise HTTPException(status_code=403, detail={"error": "FORBIDDEN", "message": "无权访问该任务"})
+    task = _get_owned_task(task_id, user)
 
     return {
         "task_id": task.task_id,
@@ -180,11 +186,7 @@ async def select_title(
     user: UserInfo = Depends(require_tenant),
 ):
     """用户选择标题"""
-    task = _tasks.get(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "任务不存在"})
-    if task.user_id != user.user_id:
-        raise HTTPException(status_code=403, detail={"error": "FORBIDDEN", "message": "无权访问该任务"})
+    task = _get_owned_task(task_id, user)
     if task.status != TaskStatus.AWAITING_TITLE_SELECTION:
         raise HTTPException(status_code=400, detail={"error": "BAD_REQUEST", "message": "当前不在标题选择阶段"})
 
@@ -207,11 +209,7 @@ async def p2_decision(
     user: UserInfo = Depends(require_tenant),
 ):
     """P2 问题处理"""
-    task = _tasks.get(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "任务不存在"})
-    if task.user_id != user.user_id:
-        raise HTTPException(status_code=403, detail={"error": "FORBIDDEN", "message": "无权访问该任务"})
+    task = _get_owned_task(task_id, user)
     if task.status != TaskStatus.AWAITING_P2_DECISION:
         raise HTTPException(status_code=400, detail={"error": "BAD_REQUEST", "message": "当前不在 P2 决策阶段"})
 
@@ -230,11 +228,7 @@ async def get_result(
     user: UserInfo = Depends(require_tenant),
 ):
     """获取最终笔记包"""
-    task = _tasks.get(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "任务不存在"})
-    if task.user_id != user.user_id:
-        raise HTTPException(status_code=403, detail={"error": "FORBIDDEN", "message": "无权访问该任务"})
+    task = _get_owned_task(task_id, user)
     if task.status != TaskStatus.COMPLETED:
         raise HTTPException(status_code=400, detail={"error": "BAD_REQUEST", "message": "任务尚未完成"})
 

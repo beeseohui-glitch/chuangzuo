@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api';
+import { extractItems } from '@/lib/api-helpers';
 import { KnowledgeEntry } from '@/types';
 
 // --- Types ---
@@ -55,12 +56,6 @@ export function useAdminOverview() {
         adminApi.getComplianceWords(),
       ]);
 
-      const extractItems = (res: { success: boolean; data: unknown }) => {
-        if (!res.success || !res.data) return [];
-        const data = res.data as { items?: unknown[] } | unknown[];
-        return Array.isArray(data) ? data : (data.items || []);
-      };
-
       const publicItems = extractItems(publicRes) as KnowledgeEntry[];
       const industryItems = extractItems(industryRes) as KnowledgeEntry[];
       const templateItems = extractItems(templateRes) as Record<string, unknown>[];
@@ -88,17 +83,9 @@ export function useAdminKnowledge(platformCategory?: string) {
     queryKey: ['admin', 'knowledge', platformCategory],
     queryFn: async () => {
       if (platformCategory === 'public') {
-        const res = await adminApi.getPublicKnowledge();
-        if (res.success && res.data) {
-          const data = res.data as { items?: KnowledgeEntry[] } | KnowledgeEntry[];
-          return Array.isArray(data) ? data : (data.items || []);
-        }
+        return extractItems<KnowledgeEntry>(await adminApi.getPublicKnowledge());
       } else if (platformCategory === 'industry') {
-        const res = await adminApi.getIndustryKnowledge();
-        if (res.success && res.data) {
-          const data = res.data as { items?: KnowledgeEntry[] } | KnowledgeEntry[];
-          return Array.isArray(data) ? data : (data.items || []);
-        }
+        return extractItems<KnowledgeEntry>(await adminApi.getIndustryKnowledge());
       }
       return [];
     },
@@ -156,19 +143,15 @@ export function useAdminTemplates(platform?: string) {
     queryKey: ['admin', 'templates', platform],
     queryFn: async () => {
       const res = await adminApi.getTemplates(platform ? { platform } : undefined);
-      if (res.success && res.data) {
-        const data = res.data as { items?: AdminTemplate[] } | AdminTemplate[];
-        const items = Array.isArray(data) ? data : (data.items || []);
-        return items.map((t) => {
-          const raw = t as unknown as Record<string, unknown>;
-          return {
-            ...t,
-            title: t.title || (raw.name as string) || t.title,
-            variables: t.variables || [],
-          };
-        }) as AdminTemplate[];
-      }
-      return [];
+      const items = extractItems<AdminTemplate>(res);
+      return items.map((t) => {
+        const raw = t as unknown as Record<string, unknown>;
+        return {
+          ...t,
+          title: t.title || (raw.name as string) || t.title,
+          variables: t.variables || [],
+        };
+      });
     },
     staleTime: 0,
   });
@@ -203,19 +186,12 @@ export function useAdminComplianceWords(level?: string) {
     queryKey: ['admin', 'compliance', level],
     queryFn: async () => {
       const res = await adminApi.getComplianceWords(level && level !== 'all' ? { category: level } : undefined);
-      if (res.success && res.data) {
-        const data = res.data as { items?: Record<string, unknown>[] } | Record<string, unknown>[];
-        const items = Array.isArray(data) ? data : (data.items || []);
-        return items.map((w) => {
-          const raw = w as unknown as Record<string, unknown>;
-          return {
-            ...w,
-            level: (raw.severity as string) || w.level,
-            description: (raw.suggestion as string) || w.description || '',
-          };
-        }) as AdminComplianceWord[];
-      }
-      return [];
+      const items = extractItems<Record<string, unknown>>(res);
+      return items.map((w) => ({
+        ...w,
+        level: (w.severity as string) || w.level,
+        description: (w.suggestion as string) || w.description || '',
+      })) as AdminComplianceWord[];
     },
     staleTime: 0,
   });
@@ -262,12 +238,6 @@ export function useAdminStats() {
         adminApi.getComplianceWords(),
       ]);
 
-      const extractItems = (res: { success: boolean; data: unknown }) => {
-        if (!res.success || !res.data) return [];
-        const data = res.data as { items?: unknown[] } | unknown[];
-        return Array.isArray(data) ? data : (data.items || []);
-      };
-
       const publicCount = extractItems(publicRes).length;
       const industryItems = extractItems(industryRes) as KnowledgeEntry[];
       const templateCount = extractItems(templateRes).length;
@@ -276,7 +246,7 @@ export function useAdminStats() {
       // 按行业分组
       const industryMap: Record<string, number> = {};
       for (const item of industryItems) {
-        const meta = (item as Record<string, unknown>).metadata as Record<string, unknown> | undefined;
+        const meta = (item as unknown as Record<string, unknown>).metadata as Record<string, unknown> | undefined;
         const industry = (meta?.industry as string) || '其他';
         industryMap[industry] = (industryMap[industry] || 0) + 1;
       }

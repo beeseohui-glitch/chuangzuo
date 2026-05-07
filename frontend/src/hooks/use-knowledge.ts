@@ -2,28 +2,20 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { knowledgeApi } from '@/lib/api';
-import { KnowledgeEntry } from '@/types';
+import { extractItems } from '@/lib/api-helpers';
+import { KnowledgeEntry, KnowledgeStats } from '@/types';
 
 export function useKnowledgeList(category?: string) {
   return useQuery({
     queryKey: ['knowledge', 'list', category],
     queryFn: async () => {
       const res = await knowledgeApi.getList({ category: category !== 'all' ? category : undefined });
-      if (res.success && res.data) {
-        const data = res.data as { items?: KnowledgeEntry[] } | KnowledgeEntry[];
-        if (Array.isArray(data)) return data;
-        return (data.items || []) as KnowledgeEntry[];
-      }
+      const items = extractItems<KnowledgeEntry>(res);
+      if (items.length > 0 || res.success) return items;
       throw new Error(res.error || '获取知识列表失败');
     },
     staleTime: 60 * 1000,
   });
-}
-
-export interface KnowledgeStats {
-  total_entries: number;
-  by_category: Record<string, number>;
-  recent_updates: KnowledgeEntry[];
 }
 
 export function useKnowledgeStats() {
@@ -31,9 +23,8 @@ export function useKnowledgeStats() {
     queryKey: ['knowledge', 'stats'],
     queryFn: async () => {
       const res = await knowledgeApi.getList({});
-      if (res.success && res.data) {
-        const data = res.data as { items?: KnowledgeEntry[] } | KnowledgeEntry[];
-        const items: KnowledgeEntry[] = Array.isArray(data) ? data : (data.items || []);
+      if (res.success) {
+        const items = extractItems<KnowledgeEntry>(res);
         const byCategory: Record<string, number> = {};
         for (const item of items) {
           const cat = item.category || '未分类';
@@ -99,9 +90,9 @@ export function useSearchKnowledge(query: string) {
     queryFn: async () => {
       const res = await knowledgeApi.search(query);
       if (res.success && res.data) {
-        const data = res.data as { entries?: KnowledgeEntry[] } | KnowledgeEntry[];
+        const data = res.data as { entries?: KnowledgeEntry[]; items?: KnowledgeEntry[] } | KnowledgeEntry[];
         if (Array.isArray(data)) return data;
-        return (data.entries || []) as KnowledgeEntry[];
+        return (data.entries || data.items || []) as KnowledgeEntry[];
       }
       throw new Error(res.error || '搜索失败');
     },

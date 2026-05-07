@@ -95,25 +95,18 @@ class LLMResponseCache:
     """LLM 响应缓存（L4 兜底用）"""
 
     def __init__(self, ttl_seconds: int = 3600):
-        self._cache: dict[str, tuple[str, float]] = {}
-        self._ttl = ttl_seconds
+        from tools.cache_tools import TTLCache
+        self._cache = TTLCache(ttl_seconds)
 
     def _cache_key(self, messages: list[dict], model: str) -> str:
         content = json.dumps({"messages": messages, "model": model}, sort_keys=True)
         return hashlib.md5(content.encode()).hexdigest()
 
     def get(self, messages: list[dict], model: str) -> Optional[str]:
-        key = self._cache_key(messages, model)
-        if key in self._cache:
-            value, ts = self._cache[key]
-            if time.time() - ts < self._ttl:
-                return value
-            del self._cache[key]
-        return None
+        return self._cache.get(self._cache_key(messages, model))
 
     def put(self, messages: list[dict], model: str, response: str):
-        key = self._cache_key(messages, model)
-        self._cache[key] = (response, time.time())
+        self._cache.put(self._cache_key(messages, model), response)
 
     def clear(self):
         self._cache.clear()

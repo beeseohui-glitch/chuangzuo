@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { userApi, enterpriseApi } from '@/lib/api';
-import { Enterprise, PlanType } from '@/types';
+import { Enterprise, PlanType, EnterpriseQuota } from '@/types';
 
 export function useUserProfile() {
   return useQuery({
@@ -26,12 +26,6 @@ export function useEnterpriseInfo() {
     },
     staleTime: 5 * 60 * 1000,
   });
-}
-
-export interface EnterpriseQuota {
-  monthly_limit: number;
-  used: number;
-  reset_date: string;
 }
 
 export function useEnterpriseQuota() {

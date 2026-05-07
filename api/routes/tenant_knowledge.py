@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from api.db import get_db_conn
 from api.deps import require_tenant, UserInfo
+from api.utils import row_to_dict
 
 router = APIRouter(prefix="/api/v1/tenant/knowledge", tags=["租户知识库"])
 
@@ -51,25 +52,6 @@ class SemanticSearchRequest(BaseModel):
     query: str
     category: Optional[str] = None
     limit: int = 10
-
-
-def _row_to_dict(row) -> dict:
-    """将 asyncpg Record 转为前端兼容的 dict"""
-    d = dict(row)
-    # tags 存储为 JSONB，asyncpg 自动解析为 list
-    if "tags" in d and isinstance(d["tags"], str):
-        d["tags"] = json.loads(d["tags"])
-    # metadata 存储为 JSONB
-    if "metadata" in d and isinstance(d["metadata"], str):
-        d["metadata"] = json.loads(d["metadata"])
-    # datetime 转字符串
-    for key in ("created_at", "updated_at"):
-        if key in d and d[key] is not None and not isinstance(d[key], str):
-            d[key] = d[key].isoformat()
-    # SERIAL id 是 int，前端期望 string
-    if "id" in d:
-        d["id"] = str(d["id"])
-    return d
 
 
 # ── 接口 ──────────────────────────────────────────────────
@@ -142,7 +124,7 @@ async def list_items(
         )
 
     return {
-        "items": [_row_to_dict(r) for r in rows],
+        "items": [row_to_dict(r) for r in rows],
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -163,7 +145,7 @@ async def create_item(
             user.enterprise_id, req.category, req.title, req.content,
             json.dumps(req.tags, ensure_ascii=False), user.user_id,
         )
-    return _row_to_dict(row)
+    return row_to_dict(row)
 
 
 @router.put("/items/{item_id}")
@@ -193,7 +175,7 @@ async def update_item(
             json.dumps(req.tags, ensure_ascii=False) if req.tags is not None else None,
             int(item_id),
         )
-    return _row_to_dict(row)
+    return row_to_dict(row)
 
 
 @router.delete("/items/{item_id}")
@@ -248,7 +230,7 @@ async def upload_file(
             user.enterprise_id, category, file.filename or "未命名文件",
             text, json.dumps(metadata, ensure_ascii=False), user.user_id,
         )
-    return _row_to_dict(row)
+    return row_to_dict(row)
 
 
 @router.post("/search")
@@ -272,7 +254,7 @@ async def semantic_search(
             *params, req.limit,
         )
 
-    entries = [_row_to_dict(r) for r in rows]
+    entries = [row_to_dict(r) for r in rows]
     for e in entries:
         e["score"] = 1.0  # ILIKE 匹配统一给 1.0 分
 

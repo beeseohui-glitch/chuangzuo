@@ -3,16 +3,19 @@
 """
 
 import json
-import os
-from pathlib import Path
+import logging
 from typing import Optional
 
 from crewai import Agent
-from crewai.llm import LLM
 from crewai.tools import BaseTool
 
-from config import TOPIC_AGENT, LLMConfig
+from config import TOPIC_AGENT, LLMManagerConfig
 from models import TopicIdea, TopicCategory, TopicSource, TopicListOutput
+from tools.prompt_tools import prompt_manager
+from tools.crewai_llm import create_llm
+from tools.llm_tools import LLMResponseParser
+
+logger = logging.getLogger(__name__)
 
 
 class TopicAgent:
@@ -20,11 +23,11 @@ class TopicAgent:
 
     def __init__(
         self,
-        llm_config: Optional[LLMConfig] = None,
+        llm_config: Optional[LLMManagerConfig] = None,
         tools: Optional[list[BaseTool]] = None,
     ):
         self.config = TOPIC_AGENT
-        self.llm_config = llm_config
+        self._llm_config = llm_config
         self.tools = tools or []
         self._agent: Optional[Agent] = None
 
@@ -32,38 +35,16 @@ class TopicAgent:
     def agent(self) -> Agent:
         """获取 CrewAI Agent 实例"""
         if self._agent is None:
-            prompt_path = Path(self.config.prompt_file)
-            if prompt_path.exists():
-                with open(prompt_path, "r", encoding="utf-8") as f:
-                    self._prompt_template = f.read()
-            else:
-                self._prompt_template = self._get_default_prompt()
-
+            prompt = prompt_manager.load_prompt("topic_agent")
             self._agent = Agent(
                 role="内容选题专家",
                 goal="发现热门选题并生成有吸引力的选题标题",
-                backstory=self._prompt_template,
+                backstory=prompt,
                 tools=self.tools,
                 verbose=True,
-                llm=LLM(
-                    model="openai/MiniMax-M2.7",
-                    api_key=os.getenv("MINIMAX_API_KEY", ""),
-                    api_base=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.chat/v1"),
-                    llm_type="litellm",
-                ),
+                llm=create_llm(self._llm_config),
             )
         return self._agent
-
-    @property
-    def _llm(self):
-        """获取 LLM 配置"""
-        if self.llm_config:
-            return self.llm_config
-        from openai import OpenAI
-        return OpenAI(
-            api_key=os.getenv("MINIMAX_API_KEY", ""),
-            api_base=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.chat/v1"),
-        )
 
     def generate_topics(
         self,
@@ -92,7 +73,27 @@ class TopicAgent:
 
         try:
             content = response.content if hasattr(response, "content") else str(response)
-            return self._parse_response(content)
+            data = LLMResponseParser.parse_json(content)
+
+            topics = []
+            for t in data.get("topics", []):
+                try:
+                    cat = TopicCategory(t.get("category", "health_product"))
+                except ValueError:
+                    cat = TopicCategory.HEALTH_PRODUCT
+                try:
+                    src = TopicSource(t.get("source", "trending"))
+                except ValueError:
+                    src = TopicSource.TRENDING
+                topics.append(TopicIdea(
+                    id=t.get("id", "topic_unknown"), title=t.get("title", ""),
+                    description=t.get("description", ""), category=cat, source=src,
+                    keywords=t.get("keywords", []), target_persona=t.get("target_persona", ""),
+                    estimated_views=t.get("estimated_views"), competition_level=t.get("competition_level", "medium"),
+                    recommended_platforms=t.get("recommended_platforms", ["xiaohongshu"]),
+                    content_angle=t.get("content_angle", ""),
+                ))
+            return TopicListOutput(topics=topics, total=len(topics), page=1, page_size=len(topics))
         except Exception as e:
             return TopicListOutput(
                 topics=[],
@@ -127,58 +128,3 @@ class TopicAgent:
 输出格式：
 {{"topics": [{{"id": "topic_{{timestamp}}_{{random}}", "title": "标题", "description": "描述", "category": "{category}", "source": "trending", "keywords": ["关键词1", "关键词2"], "target_persona": "{target_persona}", "estimated_views": 10000, "competition_level": "medium", "recommended_platforms": ["xiaohongshu"], "content_angle": "角度"}}]}}
 """
-
-    def _parse_response(self, content: str) -> TopicListOutput:
-        """解析响应"""
-        start = content.find("{")
-        end = content.rfind("}") + 1
-
-        if start != -1 and end != 0:
-            json_str = content[start:end]
-            data = json.loads(json_str)
-
-            # 转换 topics
-            topics = []
-            for t in data.get("topics", []):
-                # 确保category是有效的枚举值
-                cat_str = t.get("category", "health_product")
-                try:
-                    cat = TopicCategory(cat_str)
-                except ValueError:
-                    cat = TopicCategory.HEALTH_PRODUCT
-
-                # 确保source是有效的枚举值
-                src_str = t.get("source", "trending")
-                try:
-                    src = TopicSource(src_str)
-                except ValueError:
-                    src = TopicSource.TRENDING
-
-                topics.append(TopicIdea(
-                    id=t.get("id", f"topic_unknown"),
-                    title=t.get("title", ""),
-                    description=t.get("description", ""),
-                    category=cat,
-                    source=src,
-                    keywords=t.get("keywords", []),
-                    target_persona=t.get("target_persona", ""),
-                    estimated_views=t.get("estimated_views"),
-                    competition_level=t.get("competition_level", "medium"),
-                    recommended_platforms=t.get("recommended_platforms", ["xiaohongshu"]),
-                    content_angle=t.get("content_angle", ""),
-                ))
-
-            return TopicListOutput(
-                topics=topics,
-                total=len(topics),
-                page=1,
-                page_size=len(topics),
-            )
-
-        raise ValueError(f"Cannot parse TopicListOutput from response: {content[:200]}")
-
-    def _get_default_prompt(self) -> str:
-        """获取默认提示词"""
-        return """你是内容选题专家，擅长发现热门选题并生成有吸引力的标题。
-选题来源：热门趋势、季节性、新品发布、竞品分析、用户反馈、知识库
-策略：人群痛点挖掘、差异化角度、热门趋势捕捉"""

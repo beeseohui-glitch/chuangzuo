@@ -27,6 +27,12 @@ export interface Enterprise {
 export type PlanType = 'free' | 'basic' | 'professional' | 'enterprise';
 export type EnterpriseStatus = 'active' | 'suspended' | 'terminated';
 
+export interface EnterpriseQuota {
+  monthly_limit: number;
+  used: number;
+  reset_date: string;
+}
+
 // 知识库相关类型
 export interface KnowledgeEntry {
   id: string;
@@ -70,7 +76,9 @@ export interface CreateTask {
 }
 
 export type Platform = 'xiaohongshu' | 'wechat' | 'douyin';
-export type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed';
+export type TaskStatus = 'pending' | 'processing' | 'awaiting_title_selection' | 'awaiting_p2_decision' | 'completed' | 'failed';
+
+export type AgentStatusType = 'idle' | 'running' | 'completed' | 'failed';
 
 // 笔记输出相关类型
 export interface NoteOutput {
@@ -108,7 +116,7 @@ export interface ComplianceReport {
   suggestions: string[];
 }
 
-export type ComplianceStatus = 'passed' | 'needs_revision' | 'failed';
+export type ComplianceStatus = 'passed' | 'needs_revision' | 'failed' | 'has_issues';
 
 export interface ComplianceIssue {
   type: string;

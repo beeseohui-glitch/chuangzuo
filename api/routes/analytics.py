@@ -17,22 +17,9 @@ from pydantic import BaseModel
 from api.db import get_db_conn
 from api.deps import require_tenant, UserInfo
 from api.routes.create import get_memory_notes, _memory_notes
+from api.utils import row_to_dict
 
 router = APIRouter(tags=["数据看板"])
-
-
-def _row_to_dict(row) -> dict:
-    d = dict(row)
-    for key in ("created_at", "published_at", "updated_at"):
-        if key in d and d[key] is not None and not isinstance(d[key], str):
-            d[key] = d[key].isoformat()
-    if "id" in d:
-        d["id"] = str(d["id"])
-    if "tags" in d and isinstance(d["tags"], str):
-        d["tags"] = json.loads(d["tags"])
-    if "metadata" in d and isinstance(d["metadata"], str):
-        d["metadata"] = json.loads(d["metadata"])
-    return d
 
 
 # ── 接口 ──────────────────────────────────────────────────
@@ -272,7 +259,7 @@ async def list_notes(
 
         db_total = count_row["cnt"]
         for r in rows:
-            d = _row_to_dict(r)
+            d = row_to_dict(r, extra_datetime_keys=("published_at",))
             d["status"] = "published" if d.get("published_at") else "draft"
             db_items.append(d)
     except Exception:
@@ -344,7 +331,7 @@ async def get_note(
                 nid, eid,
             )
         if row:
-            d = _row_to_dict(row)
+            d = row_to_dict(row, extra_datetime_keys=("published_at",))
             d["status"] = "published" if d.get("published_at") else "draft"
             return d
     except Exception:
