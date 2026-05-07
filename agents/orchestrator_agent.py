@@ -23,6 +23,7 @@ from crewai.llm import LLM
 from pydantic import BaseModel, Field
 
 from config import ORCHESTRATOR_AGENT, LLMManagerConfig
+from config.llm_config import get_llm_for_agent
 from tools.prompt_tools import prompt_manager
 from tools.crewai_llm import create_llm
 from tools.llm_tools import LLMCallTool, LLMResponseParser
@@ -78,7 +79,7 @@ class OrchestratorAgent:
         plan: Optional[str] = None,
     ):
         self.config = ORCHESTRATOR_AGENT
-        self._llm_config = llm_config
+        self._llm_config = llm_config or get_llm_for_agent("orchestrator")
         self._llm_tool: Optional[LLMCallTool] = None
         self._enterprise_id = enterprise_id
         self._allowed_platforms = allowed_platforms or [

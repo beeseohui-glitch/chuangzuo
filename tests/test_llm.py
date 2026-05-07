@@ -78,34 +78,30 @@ class TestLLMConfig:
     def test_manager_config_defaults(self):
         """测试管理器默认配置"""
         config = LLMManagerConfig()
-        assert config.primary.provider == LLMProvider.MINIMAX
-        assert len(config.fallbacks) == 3
+        assert config.primary.provider == LLMProvider.MIMO
+        assert len(config.fallbacks) == 2
         assert config.current_level == LLMFallbackLevel.L1_NORMAL
 
     def test_manager_get_current_provider_l1(self):
         """测试 L1 正常状态获取 provider"""
         config = LLMManagerConfig()
         provider = config.get_current_provider()
-        assert provider.provider == LLMProvider.MINIMAX
+        assert provider.provider == LLMProvider.MIMO
 
     def test_manager_advance_fallback(self):
         """测试降级推进"""
         config = LLMManagerConfig()
 
-        # 第一次 advance → MIMO
+        # 第一次 advance → DEEPSEEK
         config.advance_fallback()
         assert config.current_level == LLMFallbackLevel.L3_FALLBACK
-        assert config.get_current_provider().provider == LLMProvider.MIMO
-
-        # 第二次 advance → DEEPSEEK
-        config.advance_fallback()
         assert config.get_current_provider().provider == LLMProvider.DEEPSEEK
 
-        # 第三次 advance → QWEN
+        # 第二次 advance → QWEN
         config.advance_fallback()
         assert config.get_current_provider().provider == LLMProvider.QWEN
 
-        # 第四次 advance → 保持 QWEN（已用尽）
+        # 第三次 advance → 保持 QWEN（已用尽）
         config.advance_fallback()
         assert config.get_current_provider().provider == LLMProvider.QWEN
         assert config.is_all_fallbacks_exhausted
@@ -117,7 +113,7 @@ class TestLLMConfig:
         config.advance_fallback()
         config.reset()
         assert config.current_level == LLMFallbackLevel.L1_NORMAL
-        assert config.get_current_provider().provider == LLMProvider.MINIMAX
+        assert config.get_current_provider().provider == LLMProvider.MIMO
         assert not config.is_all_fallbacks_exhausted
 
     def test_manager_get_next_fallback(self):
@@ -125,20 +121,19 @@ class TestLLMConfig:
         config = LLMManagerConfig()
         next_fb = config.get_next_fallback()
         assert next_fb is not None
-        assert next_fb.provider == LLMProvider.MIMO
+        assert next_fb.provider == LLMProvider.DEEPSEEK
 
     def test_load_config_from_env(self):
         """测试从环境变量加载配置"""
         with patch.dict(os.environ, {
-            "MINIMAX_API_KEY": "test-minimax-key",
-            "MINIMAX_BASE_URL": "https://custom.minimax.com/v1",
             "MIMO_API_KEY": "test-mimo-key",
+            "MIMO_BASE_URL": "https://token-plan-cn.xiaomimimo.com/v1",
             "DEEPSEEK_API_KEY": "test-deepseek-key",
         }):
             config = load_llm_config_from_env()
-            assert config.primary.api_key == "test-minimax-key"
-            assert config.primary.base_url == "https://custom.minimax.com/v1"
-            assert len(config.fallbacks) >= 2  # mimo + deepseek
+            assert config.primary.api_key == "test-mimo-key"
+            assert config.primary.base_url == "https://token-plan-cn.xiaomimimo.com/v1"
+            assert len(config.fallbacks) >= 1  # deepseek
 
 
 # ── LLM 降级模块测试 ──────────────────────────────────────
@@ -265,7 +260,7 @@ class TestLLMCallTool:
         tool = LLMCallTool()
         status = tool.get_status()
         assert status["current_level"] == LLMFallbackLevel.L1_NORMAL
-        assert status["current_provider"] == LLMProvider.MINIMAX
+        assert status["current_provider"] == LLMProvider.MIMO
 
     def test_tool_call_with_mock_success(self):
         """测试模拟成功调用"""
@@ -307,7 +302,7 @@ class TestLLMCallTool:
         messages = [{"role": "user", "content": "hello"}]
 
         # 先写入缓存
-        tool._cache.put(messages, "MiniMax-M2.7", "cached result")
+        tool._cache.put(messages, "mimo-v2.5-pro", "cached result")
 
         # Mock 所有调用失败
         with patch.object(tool, '_do_call', side_effect= RuntimeError("all failed")):
@@ -473,15 +468,15 @@ class TestCrewAILLMIntegration:
         from tools.crewai_llm import create_llm
 
         llm = create_llm()
-        assert llm.model == "openai/MiniMax-M2.7"
+        assert llm.model == "openai/mimo-v2.5-pro"
 
     def test_create_llm_with_custom_config(self):
         """测试自定义配置创建 LLM"""
         from tools.crewai_llm import create_llm
 
-        config = LLMManagerConfig(primary=MiniMaxConfig(api_key="test-key"))
+        config = LLMManagerConfig(primary=MimoConfig(api_key="test-key"))
         llm = create_llm(config)
-        assert "MiniMax" in llm.model
+        assert "mimo" in llm.model
 
     def test_create_default_llm_tool(self):
         """测试创建默认 LLM 工具"""
@@ -495,14 +490,14 @@ class TestCrewAILLMIntegration:
 
 
 @pytest.mark.skipif(
-    not os.getenv("MINIMAX_API_KEY"),
-    reason="MINIMAX_API_KEY not set"
+    not os.getenv("MIMO_API_KEY"),
+    reason="MIMO_API_KEY not set"
 )
 class TestLLMIntegration:
     """LLM 集成测试（需要真实 API Key）"""
 
-    def test_minimax_api_call(self):
-        """测试 MiniMax API 调用"""
+    def test_mimo_api_call(self):
+        """测试 MiMo API 调用"""
         from tools.llm_tools import LLMCallTool
 
         tool = LLMCallTool()

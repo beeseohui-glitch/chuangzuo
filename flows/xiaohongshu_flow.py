@@ -13,6 +13,7 @@ PRD 4.1 完整流程：
 """
 
 import logging
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -84,24 +85,38 @@ class XiaohongshuFlow(Flow):
         self._degraded: bool = False
         self._degradation_reason: Optional[str] = None
 
+        # 耗时监控
+        self._flow_start_time: float = 0
+
     # ── Step 1: 素材检索 ────────────────────────────────────
 
     @start()
-    def material_search(self, input_data: dict) -> MaterialPack:
+    def material_search(self) -> MaterialPack:
         """
         素材检索
 
-        Args:
-            input_data: 包含 product, scene, persona, enterprise_id
+        从 self.state 读取输入（product, scene, persona, enterprise_id）。
 
         Returns:
             MaterialPack: 素材包
         """
+        self._flow_start_time = time.time()
+        print("\n" + "=" * 50)
+        print("  小红书创作流程 - 耗时监控")
+        print("=" * 50)
+
+        # CrewAI Flow 把 kickoff(inputs=...) 存到 state，不直接传参
+        state = self.state
+        product = state.get("product", "") if isinstance(state, dict) else getattr(state, "product", "")
+        scene = state.get("scene", "") if isinstance(state, dict) else getattr(state, "scene", "")
+        persona = state.get("persona", "") if isinstance(state, dict) else getattr(state, "persona", "")
+        enterprise_id = state.get("enterprise_id", "") if isinstance(state, dict) else getattr(state, "enterprise_id", "")
+
         result = self.crew.material_agent.search(
-            product=input_data.get("product", ""),
-            scene=input_data.get("scene"),
-            persona=input_data.get("persona"),
-            enterprise_id=input_data.get("enterprise_id"),
+            product=product,
+            scene=scene,
+            persona=persona,
+            enterprise_id=enterprise_id,
         )
 
         self._material_pack = result
@@ -136,6 +151,7 @@ class XiaohongshuFlow(Flow):
 
         校验失败时重试1次，仍失败则降级（标注"建议人工优化"）。
         """
+        t = time.time()
         topic = material_pack.product.name if material_pack.product else "产品推荐"
         material_dict = material_pack.model_dump()
 
@@ -150,6 +166,8 @@ class XiaohongshuFlow(Flow):
             degrade_reason="标题质量不达标",
         )
         self._title_output = result
+        elapsed = (time.time() - t) * 1000
+        print(f"[耗时] 标题Agent - 总计: {elapsed:.0f}ms")
         return result
 
     # ── Step 4: 校验标题 ────────────────────────────────────
@@ -237,6 +255,7 @@ class XiaohongshuFlow(Flow):
         if not note_output.article:
             return self._quality_result(note_output, None, True)
 
+        t = time.time()
         for attempt in range(MAX_STEP_RETRIES + 1):
             compliance_report = self.crew.compliance_agent.check(
                 title=self._selected_title or "",
@@ -247,6 +266,8 @@ class XiaohongshuFlow(Flow):
 
             if not compliance_report.has_p0_issues:
                 self._compliance_report = compliance_report
+                elapsed = (time.time() - t) * 1000
+                print(f"[耗时] 合规校验(quality_evaluation): {elapsed:.0f}ms")
                 return self._quality_result(note_output, compliance_report, False)
 
             if attempt < MAX_STEP_RETRIES:
@@ -271,6 +292,8 @@ class XiaohongshuFlow(Flow):
         self._degraded = True
         self._degradation_reason = "合规P0问题未修复"
         self._compliance_report = compliance_report
+        elapsed = (time.time() - t) * 1000
+        print(f"[耗时] 合规校验(quality_evaluation): {elapsed:.0f}ms (降级)")
         return self._quality_result(note_output, compliance_report, True)
 
     # ── Step 7: 标签生成 + 最终合规检查 ─────────────────────
@@ -291,16 +314,20 @@ class XiaohongshuFlow(Flow):
         )
 
         # 生成标签
+        t = time.time()
         tags = self.crew.tag_agent.generate(
             article=note_output.article,
             title=self._selected_title or "",
             material_pack=material_dict,
         )
         self._tags = tags
+        elapsed = (time.time() - t) * 1000
+        print(f"[耗时] 标签Agent - 总计: {elapsed:.0f}ms")
 
         # 最终合规检查（如果之前没有合规报告或有P0问题，重新检查）
         compliance_report = quality_result.get("compliance_report")
         if compliance_report is None or compliance_report.has_p0_issues:
+            t = time.time()
             compliance_report = self.crew.compliance_agent.check(
                 title=self._selected_title or "",
                 article=note_output.article,
@@ -308,6 +335,8 @@ class XiaohongshuFlow(Flow):
                 brand_taboos=self._brand_taboos,
             )
             self._compliance_report = compliance_report
+            elapsed = (time.time() - t) * 1000
+            print(f"[耗时] 合规Agent - 总计: {elapsed:.0f}ms")
 
         return {
             **quality_result,
@@ -344,19 +373,23 @@ class XiaohongshuFlow(Flow):
             NotePack: 完整笔记包
         """
         self._reset_state()
+        self._flow_start_time = time.time()
 
         try:
             result = super().kickoff(input_data)
             # CrewAI Flow kickoff 返回最后一个步骤的输出
             if isinstance(result, NotePack):
+                self._print_total_time()
                 return result
             # 如果返回的是 dict（中间步骤），从状态组装
+            self._print_total_time()
             return self._assemble_from_state()
         except RetryLimitExceeded as e:
             logger.error(str(e))
             self._warnings.append(str(e))
             self._degraded = True
             self._degradation_reason = str(e)
+            self._print_total_time()
             return self._assemble_from_state()
 
     # ── 内部方法 ───────────────────────────────────────────
@@ -422,7 +455,7 @@ class XiaohongshuFlow(Flow):
             else None,
             created_at=datetime.now().isoformat(),
             retry_count=self._total_retries,
-            llm_used="MiniMax-M2.7",
+            llm_used="mimo-v2.5-pro",
             warnings=self._warnings.copy(),
             degraded=self._degraded,
             degradation_reason=self._degradation_reason,
@@ -487,3 +520,9 @@ class XiaohongshuFlow(Flow):
     def _assemble_from_state(self) -> NotePack:
         """从当前状态组装 NotePack（异常恢复用）"""
         return self._build_note_pack(self._note_output, self._tags, self._compliance_report)
+
+    def _print_total_time(self):
+        """打印全流程总耗时"""
+        if self._flow_start_time > 0:
+            total_elapsed = (time.time() - self._flow_start_time) * 1000
+            print(f"[耗时] ========== 全流程总耗时: {total_elapsed:.0f}ms ==========\n")

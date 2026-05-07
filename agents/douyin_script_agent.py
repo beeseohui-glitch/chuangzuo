@@ -8,6 +8,7 @@ from crewai import Agent
 from crewai.tools import BaseTool
 
 from config import LLMManagerConfig, DouyinConfig
+from config.llm_config import get_llm_for_agent
 from models import DouyinScript, DouyinVideo, DouyinContent
 from tools.prompt_tools import prompt_manager
 from tools.crewai_llm import create_llm
@@ -23,7 +24,7 @@ class DouyinScriptAgent:
         platform_config: Optional[DouyinConfig] = None,
         tools: Optional[list[BaseTool]] = None,
     ):
-        self._llm_config = llm_config
+        self._llm_config = llm_config or get_llm_for_agent("douyin")
         self.platform_config = platform_config or DouyinConfig()
         self.tools = tools or []
         self._agent: Optional[Agent] = None

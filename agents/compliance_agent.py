@@ -16,6 +16,7 @@ from crewai import Agent
 from crewai.tools import BaseTool
 
 from config import COMPLIANCE_AGENT, LLMManagerConfig, XiaohongshuConfig
+from config.llm_config import get_llm_for_agent
 from models import (
     ComplianceReport,
     ComplianceStatus,
@@ -40,7 +41,7 @@ class ComplianceAgent:
     ):
         self.config = COMPLIANCE_AGENT
         self.platform_config = platform_config or XiaohongshuConfig()
-        self._llm_config = llm_config
+        self._llm_config = llm_config or get_llm_for_agent("compliance")
         self._tools = tools or []
         self._agent: Optional[Agent] = None
         self._llm_tool: Optional[LLMCallTool] = None

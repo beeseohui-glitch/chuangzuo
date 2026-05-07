@@ -115,6 +115,8 @@ class MaterialSearchTool(BaseTool):
         Returns:
             MaterialPack: 结构化素材包
         """
+        total_start = time.time()
+
         # 构建检索查询
         query_parts = [product]
         if scene:
@@ -127,17 +129,22 @@ class MaterialSearchTool(BaseTool):
         cache_key = self._cache_key(query, enterprise_id)
         cached = self._get_cached(cache_key)
         if cached is not None:
-            logger.info(f"Material search cache hit for: {query[:30]}")
+            elapsed = (time.time() - total_start) * 1000
+            print(f"[耗时] 素材检索 - 缓存命中: {elapsed:.0f}ms")
             return cached
 
         # 编码查询
+        t = time.time()
         query_embedding = self.embedding_tool.encode(query)[0].tolist()
+        embed_elapsed = (time.time() - t) * 1000
+        print(f"[耗时] 素材检索 - 向量化: {embed_elapsed:.0f}ms")
 
         # 三层检索
         all_results = []
 
         # 第一层：企业私有库（最精准）
         if enterprise_id:
+            t = time.time()
             self.vector_store.set_session_context(
                 enterprise_id=enterprise_id,
                 is_agent=True,
@@ -150,9 +157,11 @@ class MaterialSearchTool(BaseTool):
                 min_similarity=0.3,
             )
             all_results.extend(private_results)
-            logger.info(f"Private KB: {len(private_results)} results")
+            elapsed = (time.time() - t) * 1000
+            print(f"[耗时] 素材检索 - 企业私有库: {elapsed:.0f}ms ({len(private_results)}条)")
 
         # 第二层：行业知识库（补充）
+        t = time.time()
         self.vector_store.set_session_context(is_agent=True)
         industry_results = self.vector_store.search(
             embedding=query_embedding,
@@ -162,9 +171,11 @@ class MaterialSearchTool(BaseTool):
             min_similarity=0.3,
         )
         all_results.extend(industry_results)
-        logger.info(f"Industry KB: {len(industry_results)} results")
+        elapsed = (time.time() - t) * 1000
+        print(f"[耗时] 素材检索 - 行业知识库: {elapsed:.0f}ms ({len(industry_results)}条)")
 
         # 第三层：公共知识库（兜底）
+        t = time.time()
         public_results = self.vector_store.search(
             embedding=query_embedding,
             top_k=5,
@@ -173,7 +184,8 @@ class MaterialSearchTool(BaseTool):
             min_similarity=0.3,
         )
         all_results.extend(public_results)
-        logger.info(f"Public KB: {len(public_results)} results")
+        elapsed = (time.time() - t) * 1000
+        print(f"[耗时] 素材检索 - 公共知识库: {elapsed:.0f}ms ({len(public_results)}条)")
 
         # 清除会话上下文
         try:
@@ -186,6 +198,9 @@ class MaterialSearchTool(BaseTool):
 
         # 写入缓存
         self._put_cache(cache_key, pack)
+
+        total_elapsed = (time.time() - total_start) * 1000
+        print(f"[耗时] 素材检索 - 总计: {total_elapsed:.0f}ms")
 
         return pack
 

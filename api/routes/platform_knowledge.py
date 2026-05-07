@@ -110,11 +110,15 @@ async def create_public(
 ):
     async with get_db_conn(is_platform_admin=True, user_role="platform_admin") as conn:
         row = await conn.fetchrow(
-            "INSERT INTO knowledge_base (data_level, platform_category, category, title, content, tags, created_by) "
-            "VALUES ('platform', 'public', $1, $2, $3, $4, $5) RETURNING *",
+            "INSERT INTO knowledge_base (data_level, platform_category, category, title, content, tags, created_by, sync_status) "
+            "VALUES ('platform', 'public', $1, $2, $3, $4, $5, 'pending') RETURNING *",
             req.category, req.title, req.content,
             json.dumps(req.tags, ensure_ascii=False), user.user_id,
         )
+
+    from api.embedding_service import schedule_embedding_update
+    schedule_embedding_update(row["id"], req.title, req.content)
+
     return row_to_dict(row)
 
 
@@ -126,13 +130,17 @@ async def update_public(
 ):
     async with get_db_conn(is_platform_admin=True, user_role="platform_admin") as conn:
         row = await conn.fetchrow(
-            "UPDATE knowledge_base SET title=$1, content=$2, category=$3, tags=$4, updated_at=NOW() "
+            "UPDATE knowledge_base SET title=$1, content=$2, category=$3, tags=$4, updated_at=NOW(), sync_status='pending' "
             "WHERE id=$5 AND data_level='platform' AND platform_category='public' RETURNING *",
             req.title, req.content, req.category,
             json.dumps(req.tags, ensure_ascii=False), int(item_id),
         )
     if not row:
         raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "条目不存在"})
+
+    from api.embedding_service import schedule_embedding_update
+    schedule_embedding_update(int(item_id), req.title, req.content)
+
     return row_to_dict(row)
 
 
@@ -199,11 +207,15 @@ async def create_industry(
     metadata = json.dumps({"industry": req.industry}, ensure_ascii=False)
     async with get_db_conn(is_platform_admin=True, user_role="platform_admin") as conn:
         row = await conn.fetchrow(
-            "INSERT INTO knowledge_base (data_level, platform_category, category, title, content, tags, metadata, created_by) "
-            "VALUES ('platform', 'industry', $1, $2, $3, $4, $5, $6) RETURNING *",
+            "INSERT INTO knowledge_base (data_level, platform_category, category, title, content, tags, metadata, created_by, sync_status) "
+            "VALUES ('platform', 'industry', $1, $2, $3, $4, $5, $6, 'pending') RETURNING *",
             req.category, req.title, req.content,
             json.dumps(req.tags, ensure_ascii=False), metadata, user.user_id,
         )
+
+    from api.embedding_service import schedule_embedding_update
+    schedule_embedding_update(row["id"], req.title, req.content)
+
     d = row_to_dict(row)
     d["industry"] = req.industry
     return d
@@ -218,13 +230,17 @@ async def update_industry(
     metadata = json.dumps({"industry": req.industry}, ensure_ascii=False)
     async with get_db_conn(is_platform_admin=True, user_role="platform_admin") as conn:
         row = await conn.fetchrow(
-            "UPDATE knowledge_base SET title=$1, content=$2, category=$3, tags=$4, metadata=$5, updated_at=NOW() "
+            "UPDATE knowledge_base SET title=$1, content=$2, category=$3, tags=$4, metadata=$5, updated_at=NOW(), sync_status='pending' "
             "WHERE id=$6 AND data_level='platform' AND platform_category='industry' RETURNING *",
             req.title, req.content, req.category,
             json.dumps(req.tags, ensure_ascii=False), metadata, int(item_id),
         )
     if not row:
         raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "条目不存在"})
+
+    from api.embedding_service import schedule_embedding_update
+    schedule_embedding_update(int(item_id), req.title, req.content)
+
     d = row_to_dict(row)
     d["industry"] = req.industry
     return d
@@ -285,10 +301,14 @@ async def create_template(
 ):
     async with get_db_conn(is_platform_admin=True, user_role="platform_admin") as conn:
         row = await conn.fetchrow(
-            "INSERT INTO knowledge_base (data_level, platform_category, category, title, content, created_by) "
-            "VALUES ('platform', 'template', $1, $2, $3, $4) RETURNING *",
+            "INSERT INTO knowledge_base (data_level, platform_category, category, title, content, created_by, sync_status) "
+            "VALUES ('platform', 'template', $1, $2, $3, $4, 'pending') RETURNING *",
             req.platform, req.name, req.content, user.user_id,
         )
+
+    from api.embedding_service import schedule_embedding_update
+    schedule_embedding_update(row["id"], req.name, req.content)
+
     d = row_to_dict(row)
     d["name"] = d.get("title", "")
     d["platform"] = d.get("category", "")
@@ -303,12 +323,16 @@ async def update_template(
 ):
     async with get_db_conn(is_platform_admin=True, user_role="platform_admin") as conn:
         row = await conn.fetchrow(
-            "UPDATE knowledge_base SET category=$1, title=$2, content=$3, updated_at=NOW() "
+            "UPDATE knowledge_base SET category=$1, title=$2, content=$3, updated_at=NOW(), sync_status='pending' "
             "WHERE id=$4 AND data_level='platform' AND platform_category='template' RETURNING *",
             req.platform, req.name, req.content, int(item_id),
         )
     if not row:
         raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "模板不存在"})
+
+    from api.embedding_service import schedule_embedding_update
+    schedule_embedding_update(int(item_id), req.name, req.content)
+
     d = row_to_dict(row)
     d["name"] = d.get("title", "")
     d["platform"] = d.get("category", "")

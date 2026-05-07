@@ -50,10 +50,17 @@ class MiniMaxConfig(LLMConfig):
 
 
 class MimoConfig(LLMConfig):
-    """Mimo 备用配置（备LLM1）"""
+    """MiMo Pro 配置"""
     provider: LLMProvider = Field(default=LLMProvider.MIMO)
     model: str = Field(default="mimo-v2.5-pro")
-    base_url: str = Field(default="https://api.mimo.ai/v1")
+    base_url: str = Field(default="https://token-plan-cn.xiaomimimo.com/v1")
+
+
+class MimoSimpleConfig(LLMConfig):
+    """MiMo Simple 配置"""
+    provider: LLMProvider = Field(default=LLMProvider.MIMO)
+    model: str = Field(default="mimo-v2.5")
+    base_url: str = Field(default="https://token-plan-cn.xiaomimimo.com/v1")
 
 
 class DeepSeekConfig(LLMConfig):
@@ -72,8 +79,8 @@ class QwenConfig(LLMConfig):
 
 class LLMManagerConfig(BaseModel):
     """LLM 管理器配置"""
-    primary: LLMConfig = Field(default_factory=MiniMaxConfig)
-    fallbacks: list[LLMConfig] = Field(default_factory=lambda: [MimoConfig(), DeepSeekConfig(), QwenConfig()])
+    primary: LLMConfig = Field(default_factory=MimoConfig)
+    fallbacks: list[LLMConfig] = Field(default_factory=lambda: [DeepSeekConfig(), QwenConfig()])
     fallback_settings: LLMFallbackConfig = Field(default_factory=LLMFallbackConfig)
     current_level: LLMFallbackLevel = Field(default=LLMFallbackLevel.L1_NORMAL)
     _fallback_index: int = PrivateAttr(default=-1)  # 当前降级到第几个fallback，-1表示未降级
@@ -118,22 +125,14 @@ class LLMManagerConfig(BaseModel):
 
 def load_llm_config_from_env() -> LLMManagerConfig:
     """从环境变量加载 LLM 配置"""
-    # 主LLM: MiniMax
-    primary = MiniMaxConfig(
-        api_key=os.getenv("MINIMAX_API_KEY", ""),
-        base_url=os.getenv("MINIMAX_BASE_URL", "https://api.minimax.chat/v1"),
-        model=os.getenv("MINIMAX_MODEL", "MiniMax-M2.7"),
-    )
-
-    # 备LLM1: Mimo
-    mimo_key = os.getenv("MIMO_API_KEY", "")
-    mimo = MimoConfig(
-        api_key=mimo_key,
-        base_url=os.getenv("MIMO_BASE_URL", "https://api.mimo.ai/v1"),
+    # 主LLM: MiMo
+    primary = MimoConfig(
+        api_key=os.getenv("MIMO_API_KEY", ""),
+        base_url=os.getenv("MIMO_BASE_URL", "https://token-plan-cn.xiaomimimo.com/v1"),
         model=os.getenv("MIMO_MODEL", "mimo-v2.5-pro"),
     )
 
-    # 备LLM2: DeepSeek
+    # 备LLM: DeepSeek
     deepseek_key = os.getenv("DEEPSEEK_API_KEY", "")
     deepseek = DeepSeekConfig(
         api_key=deepseek_key,
@@ -141,7 +140,7 @@ def load_llm_config_from_env() -> LLMManagerConfig:
         model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
     )
 
-    # 备LLM3: Qwen
+    # 备LLM: Qwen
     qwen_key = os.getenv("QWEN_API_KEY", "")
     qwen = QwenConfig(
         api_key=qwen_key,
@@ -149,11 +148,81 @@ def load_llm_config_from_env() -> LLMManagerConfig:
         model=os.getenv("QWEN_MODEL", "qwen-turbo"),
     )
 
-    fallbacks = [fb for fb in [mimo, deepseek, qwen] if fb.api_key]
+    fallbacks = [fb for fb in [deepseek, qwen] if fb.api_key]
 
     return LLMManagerConfig(
         primary=primary,
-        fallbacks=fallbacks if fallbacks else [mimo],
+        fallbacks=fallbacks if fallbacks else [primary],
+        fallback_settings=LLMFallbackConfig(
+            max_retries=int(os.getenv("LLM_MAX_RETRIES", "3")),
+            fallback_threshold_failures=int(os.getenv("LLM_FALLBACK_THRESHOLD", "5")),
+            fallback_threshold_latency=int(os.getenv("LLM_LATENCY_THRESHOLD", "15")),
+            cache_ttl_seconds=int(os.getenv("LLM_CACHE_TTL", "3600")),
+        ),
+    )
+
+
+# ── Agent 级别模型映射 ──────────────────────────────────────
+
+# 每个 Agent 使用的模型（pro = mimo-v2.5-pro, simple = mimo-v2.5）
+AGENT_MODEL_MAP: dict[str, str] = {
+    "orchestrator": "mimo-v2.5-pro",   # 意图识别需要推理
+    "title": "mimo-v2.5",              # 创意生成
+    "article": "mimo-v2.5-pro",        # 长文本+去AI味
+    "compliance": "mimo-v2.5-pro",     # 灰色地带判断
+    "analytics": "mimo-v2.5-pro",      # 需要推理
+    "tag": "mimo-v2.5",                # 简单分类提取
+    "topic": "mimo-v2.5",              # 选题生成
+    "kb": "mimo-v2.5",                 # 知识问答
+    "operation": "mimo-v2.5",          # 运营建议
+    "wechat": "mimo-v2.5-pro",         # 长文本创作
+    "douyin": "mimo-v2.5-pro",         # 脚本创作
+}
+
+
+def get_llm_for_agent(agent_name: str) -> LLMManagerConfig:
+    """
+    根据 Agent 名称获取对应的 LLM 配置
+
+    降级链：Pro → Simple（同 base_url，只是 model 不同）
+
+    Args:
+        agent_name: Agent 名称（如 "title", "article" 等）
+
+    Returns:
+        LLMManagerConfig: 该 Agent 专属的 LLM 配置
+    """
+    model = AGENT_MODEL_MAP.get(agent_name, "mimo-v2.5")
+    api_key = os.getenv("MIMO_API_KEY", "")
+    base_url = os.getenv("MIMO_BASE_URL", "https://token-plan-cn.xiaomimimo.com/v1")
+
+    primary = MimoConfig(api_key=api_key, base_url=base_url, model=model)
+
+    # Fallback：Pro 降级到 Simple，Simple 无更小模型可降
+    fallback_model = "mimo-v2.5" if model == "mimo-v2.5-pro" else None
+    fallbacks = []
+    if fallback_model:
+        fallbacks.append(MimoConfig(api_key=api_key, base_url=base_url, model=fallback_model))
+
+    # 额外 fallback：DeepSeek / Qwen（如果有 key）
+    deepseek_key = os.getenv("DEEPSEEK_API_KEY", "")
+    if deepseek_key:
+        fallbacks.append(DeepSeekConfig(
+            api_key=deepseek_key,
+            base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
+            model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+        ))
+    qwen_key = os.getenv("QWEN_API_KEY", "")
+    if qwen_key:
+        fallbacks.append(QwenConfig(
+            api_key=qwen_key,
+            base_url=os.getenv("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+            model=os.getenv("QWEN_MODEL", "qwen-turbo"),
+        ))
+
+    return LLMManagerConfig(
+        primary=primary,
+        fallbacks=fallbacks,
         fallback_settings=LLMFallbackConfig(
             max_retries=int(os.getenv("LLM_MAX_RETRIES", "3")),
             fallback_threshold_failures=int(os.getenv("LLM_FALLBACK_THRESHOLD", "5")),

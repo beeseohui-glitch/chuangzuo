@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useEnterpriseQuota } from '@/hooks/use-user';
-import { useKnowledgeStats } from '@/hooks/use-knowledge';
+import { useKnowledgeStats, useVectorStats } from '@/hooks/use-knowledge';
 import { useAnalyticsOverview } from '@/hooks/use-analytics';
 import {
   PenLine, BookOpen, BarChart3, TrendingUp,
@@ -23,6 +23,7 @@ export default function DashboardContent() {
   const { data: quota } = useEnterpriseQuota();
   const { data: kbStats } = useKnowledgeStats();
   const { data: analytics } = useAnalyticsOverview();
+  const { data: vectorStats } = useVectorStats();
 
   const quotaData = quota || { used: 2, monthly_limit: 5, reset_date: '2026-06-01' };
   const kbCount = kbStats?.total_entries || 0;
@@ -215,8 +216,27 @@ export default function DashboardContent() {
               <div className="flex items-center justify-between">
                 <span className="text-sm">向量索引</span>
                 <div className="flex items-center gap-1.5">
-                  <AlertCircle className="h-3.5 w-3.5 text-yellow-500" />
-                  <span className="text-sm font-medium">需同步</span>
+                  {vectorStats && vectorStats.pending === 0 && vectorStats.failed === 0 ? (
+                    <>
+                      <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                      <span className="text-sm font-medium">已同步 {vectorStats.synced} 条</span>
+                    </>
+                  ) : vectorStats && vectorStats.failed > 0 ? (
+                    <>
+                      <AlertCircle className="h-3.5 w-3.5 text-red-500" />
+                      <span className="text-sm font-medium">{vectorStats.failed} 条失败</span>
+                    </>
+                  ) : vectorStats && vectorStats.pending > 0 ? (
+                    <>
+                      <Clock className="h-3.5 w-3.5 text-yellow-500" />
+                      <span className="text-sm font-medium">同步中 {vectorStats.pending} 条</span>
+                    </>
+                  ) : (
+                    <>
+                      <AlertCircle className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="text-sm font-medium">加载中...</span>
+                    </>
+                  )}
                 </div>
               </div>
             </CardContent>

@@ -25,12 +25,10 @@ def check_env():
 
     # 检查环境变量
     env_vars = [
-        "MINIMAX_API_KEY",
-        "MINIMAX_BASE_URL",
-        "MINIMAX_MODEL",
+        "MIMO_API_KEY",
+        "MIMO_BASE_URL",
+        "MIMO_MODEL",
         "DEEPSEEK_API_KEY",
-        "OBSIDIAN_VAULT_PATH",
-        "OBSIDIAN_API_KEY",
     ]
 
     print("\n[1] Environment Variables:")

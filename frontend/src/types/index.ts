@@ -48,6 +48,7 @@ export interface KnowledgeEntry {
   metadata?: Record<string, unknown>;
   created_by?: string | null;
   updated_by?: string | null;
+  sync_status?: 'pending' | 'synced' | 'failed';
   created_at?: string;
   updated_at?: string;
 }

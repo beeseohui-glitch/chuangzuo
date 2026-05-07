@@ -191,6 +191,31 @@ async def dashboard_trends(
     }
 
 
+@router.get("/api/v1/dashboard/vector-stats")
+async def vector_stats(
+    user: UserInfo = Depends(require_tenant),
+):
+    """向量同步状态统计"""
+    eid = user.enterprise_id or ""
+    async with get_db_conn(enterprise_id=eid, user_role=user.role) as conn:
+        row = await conn.fetchrow(
+            "SELECT "
+            "  COUNT(*) as total, "
+            "  COUNT(*) FILTER (WHERE sync_status = 'synced') as synced, "
+            "  COUNT(*) FILTER (WHERE sync_status = 'pending') as pending, "
+            "  COUNT(*) FILTER (WHERE sync_status = 'failed') as failed "
+            "FROM knowledge_base "
+            "WHERE data_level = 'tenant' AND enterprise_id = $1",
+            eid,
+        )
+    return {
+        "total": row["total"] or 0,
+        "synced": row["synced"] or 0,
+        "pending": row["pending"] or 0,
+        "failed": row["failed"] or 0,
+    }
+
+
 @router.get("/api/v1/dashboard/topics")
 async def dashboard_topics(
     user: UserInfo = Depends(require_tenant),

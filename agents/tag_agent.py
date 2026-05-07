@@ -15,6 +15,7 @@ from crewai import Agent
 from crewai.tools import BaseTool
 
 from config import TAG_AGENT, LLMManagerConfig
+from config.llm_config import get_llm_for_agent
 from tools.prompt_tools import prompt_manager
 from tools.crewai_llm import create_llm
 from tools.llm_tools import LLMCallTool, LLMResponseParser
@@ -31,7 +32,7 @@ class TagAgent:
         tools: Optional[list[BaseTool]] = None,
     ):
         self.config = TAG_AGENT
-        self._llm_config = llm_config
+        self._llm_config = llm_config or get_llm_for_agent("tag")
         self._tools = tools or []
         self._agent: Optional[Agent] = None
         self._llm_tool: Optional[LLMCallTool] = None

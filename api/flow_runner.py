@@ -230,7 +230,7 @@ async def run_creation_flow(
                 "enterprise_id": enterprise_id,
                 "retry_count": 0,
                 "degraded": False,
-                "llm_used": "MiniMax-M2.7",
+                "llm_used": "mimo-v2.5-pro",
             },
         }
 

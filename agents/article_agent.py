@@ -8,12 +8,14 @@ Harness：AI味评分 + 段落结构检查 + 最多重试2次
 
 import json
 import logging
+import time
 from typing import Optional
 
 from crewai import Agent
 from crewai.tools import BaseTool
 
 from config import ARTICLE_AGENT, LLMManagerConfig
+from config.llm_config import get_llm_for_agent
 from models import NoteOutput, Paragraph
 from validators import AIFlavorScorer
 from tools.prompt_tools import prompt_manager
@@ -32,7 +34,7 @@ class ArticleAgent:
         tools: Optional[list[BaseTool]] = None,
     ):
         self.config = ARTICLE_AGENT
-        self._llm_config = llm_config
+        self._llm_config = llm_config or get_llm_for_agent("article")
         self._tools = tools or []
         self._agent: Optional[Agent] = None
         self._llm_tool: Optional[LLMCallTool] = None
@@ -76,6 +78,7 @@ class ArticleAgent:
         Returns:
             NoteOutput: 笔记输出
         """
+        total_start = time.time()
         max_retries = self.config.max_retries
         last_error = None
 
@@ -83,9 +86,15 @@ class ArticleAgent:
             prompt = self._build_prompt(title, material_pack, attempt)
 
             try:
+                # LLM 调用计时
+                t = time.time()
                 response = self.agent.kickoff(prompt)
                 content = response.content if hasattr(response, "content") else str(response)
                 data = LLMResponseParser.parse_json(content)
+                llm_elapsed = (time.time() - t) * 1000
+
+                attempt_label = f"第{attempt+1}次" if attempt == 0 else f"重试(第{attempt+1}次)"
+                print(f"[耗时] 正文Agent - LLM调用({attempt_label}): {llm_elapsed:.0f}ms")
 
                 # Ensure title is set
                 if 'title' not in data:
@@ -94,8 +103,11 @@ class ArticleAgent:
                 note = NoteOutput(**data)
 
                 # 自评AI味评分
+                t = time.time()
                 ai_score = self._scorer.score(note.article)
                 note.ai_flavor_score = ai_score
+                score_elapsed = (time.time() - t) * 1000
+                print(f"[耗时] 正文Agent - AI味评分: {score_elapsed:.0f}ms (分数: {ai_score})")
 
                 # 段落结构检查
                 if not note.paragraphs:
@@ -105,6 +117,8 @@ class ArticleAgent:
                 if ai_score >= 70 or attempt >= max_retries:
                     if ai_score < 70:
                         note.metadata["warning"] = f"AI味评分{ai_score}分，建议人工润色"
+                    total_elapsed = (time.time() - total_start) * 1000
+                    print(f"[耗时] 正文Agent - 总计: {total_elapsed:.0f}ms")
                     return note
 
                 logger.warning(f"AI flavor score {ai_score} < 70, retrying ({attempt+1}/{max_retries})")
@@ -114,6 +128,8 @@ class ArticleAgent:
                 logger.error(f"Article generation failed (attempt {attempt+1}): {e}")
 
         # 所有重试失败，返回降级结果
+        total_elapsed = (time.time() - total_start) * 1000
+        print(f"[耗时] 正文Agent - 总计: {total_elapsed:.0f}ms (失败)")
         return NoteOutput(
             title=title,
             article="",

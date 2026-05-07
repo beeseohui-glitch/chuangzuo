@@ -9,11 +9,12 @@ import { Badge } from '@/components/ui/badge';
 import {
   useKnowledgeList, useKnowledgeStats, useSearchKnowledge,
   useCreateKnowledge, useUpdateKnowledge, useDeleteKnowledge, useUploadKnowledge,
+  useResyncKnowledge,
 } from '@/hooks/use-knowledge';
 import { useToast } from '@/components/ui/toast';
 import {
   BookOpen, Upload, Search, Plus, FolderOpen, FileText,
-  Trash2, Edit3, X, ChevronRight, Database, Shield,
+  Trash2, Edit3, X, ChevronRight, Database, Shield, RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -59,6 +60,7 @@ export default function KnowledgeContent() {
   const updateMutation = useUpdateKnowledge();
   const deleteMutation = useDeleteKnowledge();
   const uploadMutation = useUploadKnowledge();
+  const resyncMutation = useResyncKnowledge();
 
   const displayItems = searchQuery.length > 0 ? searchResults : items;
 
@@ -332,6 +334,12 @@ export default function KnowledgeContent() {
                             <Badge variant="outline" className="text-xs">
                               {CATEGORIES.find((c) => c.id === item.category)?.name || item.category}
                             </Badge>
+                            {item.sync_status === 'pending' && (
+                              <Badge variant="secondary" className="text-xs bg-yellow-100 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400">向量化中</Badge>
+                            )}
+                            {item.sync_status === 'failed' && (
+                              <Badge variant="secondary" className="text-xs bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400">同步失败</Badge>
+                            )}
                           </div>
                           {selectedItemId === item.id ? (
                             <div className="mt-3 space-y-3">
@@ -355,6 +363,15 @@ export default function KnowledgeContent() {
                                 >
                                   <Trash2 className="mr-1 h-3.5 w-3.5" />删除
                                 </Button>
+                                {item.sync_status === 'failed' && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={(e) => { e.stopPropagation(); resyncMutation.mutate(item.id); }}
+                                  >
+                                    <RefreshCw className="mr-1 h-3.5 w-3.5" />重试向量化
+                                  </Button>
+                                )}
                               </div>
                             </div>
                           ) : (

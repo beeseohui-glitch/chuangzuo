@@ -10,6 +10,7 @@ from crewai.tools import BaseTool
 from pydantic import BaseModel
 
 from config import LLMManagerConfig
+from config.llm_config import get_llm_for_agent
 
 
 class PublishScheduleItem(BaseModel):
@@ -40,7 +41,7 @@ class OperationAgent:
         llm_config: Optional[LLMManagerConfig] = None,
         tools: Optional[list[BaseTool]] = None,
     ):
-        self._llm_config = llm_config
+        self._llm_config = llm_config or get_llm_for_agent("operation")
         self.tools = tools or []
         self._agent: Optional[Agent] = None
 

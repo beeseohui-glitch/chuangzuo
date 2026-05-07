@@ -11,6 +11,7 @@
 - DELETE /api/v1/tenant/knowledge/items/{id}  删除
 - POST   /api/v1/tenant/knowledge/upload  文件上传（COS）
 - POST   /api/v1/tenant/knowledge/search  语义搜索
+- POST   /api/v1/tenant/knowledge/items/{id}/resync  重新向量化
 """
 
 import asyncio
@@ -140,11 +141,16 @@ async def create_item(
     """新增知识条目"""
     async with get_db_conn(enterprise_id=user.enterprise_id, user_role=user.role) as conn:
         row = await conn.fetchrow(
-            "INSERT INTO knowledge_base (data_level, enterprise_id, category, title, content, tags, source, created_by) "
-            "VALUES ('tenant', $1, $2, $3, $4, $5, 'manual', $6) RETURNING *",
+            "INSERT INTO knowledge_base (data_level, enterprise_id, category, title, content, tags, source, created_by, sync_status) "
+            "VALUES ('tenant', $1, $2, $3, $4, $5, 'manual', $6, 'pending') RETURNING *",
             user.enterprise_id, req.category, req.title, req.content,
             json.dumps(req.tags, ensure_ascii=False), user.user_id,
         )
+
+    # 后台异步生成 embedding
+    from api.embedding_service import schedule_embedding_update
+    schedule_embedding_update(row["id"], req.title, req.content)
+
     return row_to_dict(row)
 
 
@@ -157,7 +163,7 @@ async def update_item(
     """编辑知识条目"""
     async with get_db_conn(enterprise_id=user.enterprise_id, user_role=user.role) as conn:
         existing = await conn.fetchrow(
-            "SELECT id FROM knowledge_base WHERE id = $1 AND data_level = 'tenant' AND enterprise_id = $2",
+            "SELECT id, title, content FROM knowledge_base WHERE id = $1 AND data_level = 'tenant' AND enterprise_id = $2",
             int(item_id), user.enterprise_id,
         )
         if not existing:
@@ -169,12 +175,22 @@ async def update_item(
             "content = COALESCE($2, content), "
             "category = COALESCE($3, category), "
             "tags = COALESCE($4, tags), "
-            "updated_at = NOW() "
+            "updated_at = NOW(), "
+            "sync_status = 'pending' "
             "WHERE id = $5 RETURNING *",
             req.title, req.content, req.category,
             json.dumps(req.tags, ensure_ascii=False) if req.tags is not None else None,
             int(item_id),
         )
+
+    # 仅在 content 或 title 变化时重新生成 embedding
+    need_reembed = req.title is not None or req.content is not None
+    if need_reembed:
+        new_title = req.title if req.title is not None else existing["title"]
+        new_content = req.content if req.content is not None else existing["content"]
+        from api.embedding_service import schedule_embedding_update
+        schedule_embedding_update(int(item_id), new_title, new_content)
+
     return row_to_dict(row)
 
 
@@ -223,13 +239,19 @@ async def upload_file(
     if cos_url:
         metadata["cos_url"] = cos_url
 
+    title = file.filename or "未命名文件"
     async with get_db_conn(enterprise_id=user.enterprise_id, user_role=user.role) as conn:
         row = await conn.fetchrow(
-            "INSERT INTO knowledge_base (data_level, enterprise_id, category, title, content, source, metadata, created_by) "
-            "VALUES ('tenant', $1, $2, $3, $4, 'upload', $5, $6) RETURNING *",
-            user.enterprise_id, category, file.filename or "未命名文件",
+            "INSERT INTO knowledge_base (data_level, enterprise_id, category, title, content, source, metadata, created_by, sync_status) "
+            "VALUES ('tenant', $1, $2, $3, $4, 'upload', $5, $6, 'pending') RETURNING *",
+            user.enterprise_id, category, title,
             text, json.dumps(metadata, ensure_ascii=False), user.user_id,
         )
+
+    # 后台异步生成 embedding
+    from api.embedding_service import schedule_embedding_update
+    schedule_embedding_update(row["id"], title, text)
+
     return row_to_dict(row)
 
 
@@ -238,24 +260,90 @@ async def semantic_search(
     req: SemanticSearchRequest,
     user: UserInfo = Depends(require_tenant),
 ):
-    """语义搜索（ILIKE 关键词匹配，向量搜索后续集成）"""
-    conditions = ["data_level = 'tenant'", "enterprise_id = $1", "(title ILIKE $2 OR content ILIKE $2)"]
-    params: list = [user.enterprise_id, f"%{req.query}%"]
+    """语义搜索（pgvector 向量检索）"""
+    from api.embedding_service import generate_embedding
+    from tools.vector_tools import VectorStoreTool
+    from config.vector_config import VectorStoreConfig
 
-    if req.category:
-        conditions.append("category = $3")
-        params.append(req.category)
+    # 生成查询向量
+    try:
+        query_embedding = await generate_embedding(req.query)
+    except Exception:
+        # embedding 失败时降级为 ILIKE
+        conditions = ["data_level = 'tenant'", "enterprise_id = $1", "(title ILIKE $2 OR content ILIKE $2)"]
+        params: list = [user.enterprise_id, f"%{req.query}%"]
+        if req.category:
+            conditions.append("category = $3")
+            params.append(req.category)
+        where = " AND ".join(conditions)
+        async with get_db_conn(enterprise_id=user.enterprise_id, user_role=user.role) as conn:
+            rows = await conn.fetch(
+                f"SELECT * FROM knowledge_base WHERE {where} ORDER BY created_at DESC LIMIT ${len(params) + 1}",
+                *params, req.limit,
+            )
+        entries = [row_to_dict(r) for r in rows]
+        for e in entries:
+            e["score"] = 0.0
+        return {"entries": entries, "total": len(entries), "query": req.query}
 
-    where = " AND ".join(conditions)
-
-    async with get_db_conn(enterprise_id=user.enterprise_id, user_role=user.role) as conn:
-        rows = await conn.fetch(
-            f"SELECT * FROM knowledge_base WHERE {where} ORDER BY created_at DESC LIMIT ${len(params) + 1}",
-            *params, req.limit,
+    # pgvector 语义搜索
+    config = VectorStoreConfig.from_env()
+    vs = VectorStoreTool(config)
+    try:
+        vs.set_session_context(enterprise_id=user.enterprise_id, is_agent=True)
+        results = vs.search(
+            embedding=query_embedding,
+            top_k=req.limit,
+            data_level="tenant",
+            enterprise_id=user.enterprise_id,
+            category=req.category,
+            min_similarity=0.2,
         )
+    finally:
+        try:
+            vs.clear_session_context()
+        except Exception:
+            pass
+        vs.close()
 
-    entries = [row_to_dict(r) for r in rows]
-    for e in entries:
-        e["score"] = 1.0  # ILIKE 匹配统一给 1.0 分
+    entries = []
+    for r in results:
+        e = {
+            "id": str(r["id"]),
+            "title": r.get("title", ""),
+            "content": r.get("content", ""),
+            "category": r.get("category"),
+            "tags": r.get("tags", []),
+            "metadata": r.get("metadata", {}),
+            "source": r.get("source"),
+            "created_at": r.get("created_at", ""),
+            "score": round(r.get("similarity", 0), 3),
+        }
+        entries.append(e)
 
     return {"entries": entries, "total": len(entries), "query": req.query}
+
+
+@router.post("/items/{item_id}/resync")
+async def resync_item(
+    item_id: str,
+    user: UserInfo = Depends(require_tenant),
+):
+    """手动触发重新向量化"""
+    async with get_db_conn(enterprise_id=user.enterprise_id, user_role=user.role) as conn:
+        row = await conn.fetchrow(
+            "SELECT id, title, content FROM knowledge_base WHERE id = $1 AND data_level = 'tenant' AND enterprise_id = $2",
+            int(item_id), user.enterprise_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "知识条目不存在"})
+
+        await conn.execute(
+            "UPDATE knowledge_base SET sync_status = 'pending' WHERE id = $1",
+            int(item_id),
+        )
+
+    from api.embedding_service import schedule_embedding_update
+    schedule_embedding_update(int(item_id), row["title"], row["content"])
+
+    return {"id": item_id, "sync_status": "pending", "message": "重新向量化已触发"}

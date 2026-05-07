@@ -544,7 +544,7 @@ class TestXiaohongshuFlow:
 
         assert pack.metadata.platform == "xiaohongshu"
         assert pack.metadata.retry_count >= 0
-        assert pack.metadata.llm_used == "MiniMax-M2.7"
+        assert pack.metadata.llm_used == "mimo-v2.5-pro"
         assert isinstance(pack.metadata.warnings, list)
         assert isinstance(pack.metadata.degraded, bool)
         assert isinstance(pack.metadata.created_at, str)

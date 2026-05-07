@@ -67,6 +67,9 @@ CREATE TABLE IF NOT EXISTS knowledge_base (
 
     embedding VECTOR(1024),
 
+    sync_status VARCHAR(20) DEFAULT 'pending',
+    -- 'pending' = 待向量化 | 'synced' = 已同步 | 'failed' = 向量化失败
+
     tags JSONB DEFAULT '[]',
     metadata JSONB DEFAULT '{}',
 
@@ -87,6 +90,7 @@ CREATE INDEX IF NOT EXISTS idx_kb_platform_category ON knowledge_base(platform_c
 CREATE INDEX IF NOT EXISTS idx_kb_enterprise ON knowledge_base(enterprise_id);
 CREATE INDEX IF NOT EXISTS idx_kb_category ON knowledge_base(category);
 -- IVFFlat 向量索引（vector_cosine_ops，lists=100）
+CREATE INDEX IF NOT EXISTS idx_kb_sync_status ON knowledge_base(sync_status);
 CREATE INDEX IF NOT EXISTS idx_kb_embedding ON knowledge_base
     USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 

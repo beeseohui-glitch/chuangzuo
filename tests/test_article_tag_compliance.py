@@ -85,7 +85,7 @@ class TestArticleAgent:
 
         agent = ArticleAgent()
         assert agent.config.name == "ArticleAgent"
-        assert agent._llm_config is None
+        assert agent._llm_config is not None  # auto-initialized via get_llm_for_agent
         assert agent._agent is None
         assert agent._llm_tool is None
         assert agent._scorer is not None
@@ -93,9 +93,9 @@ class TestArticleAgent:
     def test_init_with_llm_config(self):
         """测试带 LLM 配置初始化"""
         from agents.article_agent import ArticleAgent
-        from config import LLMManagerConfig, MiniMaxConfig
+        from config import LLMManagerConfig, MimoConfig
 
-        config = LLMManagerConfig(primary=MiniMaxConfig())
+        config = LLMManagerConfig(primary=MimoConfig())
         agent = ArticleAgent(llm_config=config)
         assert agent._llm_config is config
 
@@ -275,16 +275,16 @@ class TestTagAgent:
 
         agent = TagAgent()
         assert agent.config.name == "TagAgent"
-        assert agent._llm_config is None
+        assert agent._llm_config is not None  # auto-initialized via get_llm_for_agent
         assert agent._agent is None
         assert agent._llm_tool is None
 
     def test_init_with_llm_config(self):
         """测试带 LLM 配置初始化"""
         from agents.tag_agent import TagAgent
-        from config import LLMManagerConfig, MiniMaxConfig
+        from config import LLMManagerConfig, MimoConfig
 
-        config = LLMManagerConfig(primary=MiniMaxConfig())
+        config = LLMManagerConfig(primary=MimoConfig())
         agent = TagAgent(llm_config=config)
         assert agent._llm_config is config
 
@@ -435,7 +435,7 @@ class TestComplianceAgent:
 
         agent = ComplianceAgent()
         assert agent.config.name == "ComplianceAgent"
-        assert agent._llm_config is None
+        assert agent._llm_config is not None  # auto-initialized via get_llm_for_agent
         assert agent._agent is None
         assert agent._llm_tool is None
         assert agent.platform_config is not None
@@ -443,9 +443,9 @@ class TestComplianceAgent:
     def test_init_with_llm_config(self):
         """测试带 LLM 配置初始化"""
         from agents.compliance_agent import ComplianceAgent
-        from config import LLMManagerConfig, MiniMaxConfig
+        from config import LLMManagerConfig, MimoConfig
 
-        config = LLMManagerConfig(primary=MiniMaxConfig())
+        config = LLMManagerConfig(primary=MimoConfig())
         agent = ComplianceAgent(llm_config=config)
         assert agent._llm_config is config
 

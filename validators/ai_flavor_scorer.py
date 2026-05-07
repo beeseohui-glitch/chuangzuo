@@ -89,11 +89,25 @@ class AIFlavorScorer:
         句式多样性评分 (0-20分)
 
         评估方法：长短句比例、句式类型分布
+        阈值已适配中文文本（中文句子平均 10-25 字，标准差通常 5-20）
         """
         sentences = self._split_sentences(text)
 
         if len(sentences) < 3:
             return 5
+
+        # 合并极短片段（<8字的感叹句、语气词）到相邻句子
+        # 避免"姐妹们！"、"真的绝了！"等被拆成独立短句，拉低标准差
+        merged = []
+        for s in sentences:
+            if len(s) < 8 and merged:
+                merged[-1] = merged[-1] + s
+            else:
+                merged.append(s)
+        sentences = [s for s in merged if s]
+
+        if len(sentences) < 3:
+            return 10
 
         # 计算句子长度标准差
         lengths = [len(s) for s in sentences]
@@ -106,12 +120,12 @@ class AIFlavorScorer:
         std_dev = variance ** 0.5
 
         # 标准差越大，句式越多样
-        # 理想标准差在 30-80 之间
-        if 30 <= std_dev <= 80:
+        # 中文适配阈值：std_dev 8-30 为理想区间
+        if 8 <= std_dev <= 30:
             return 20
-        elif 20 <= std_dev < 30 or 80 < std_dev <= 100:
+        elif 5 <= std_dev < 8 or 30 < std_dev <= 45:
             return 15
-        elif 10 <= std_dev < 20 or 100 < std_dev <= 120:
+        elif 3 <= std_dev < 5 or 45 < std_dev <= 60:
             return 10
         else:
             return 5

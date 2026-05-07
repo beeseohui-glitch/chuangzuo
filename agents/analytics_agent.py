@@ -10,6 +10,7 @@ from crewai import Agent
 from crewai.tools import BaseTool
 
 from config import LLMManagerConfig
+from config.llm_config import get_llm_for_agent
 from models import (
     AnalyticsData,
     ContentStats,
@@ -31,7 +32,7 @@ class AnalyticsAgent:
         llm_config: Optional[LLMManagerConfig] = None,
         tools: Optional[list[BaseTool]] = None,
     ):
-        self._llm_config = llm_config
+        self._llm_config = llm_config or get_llm_for_agent("analytics")
         self.tools = tools or []
         self._agent: Optional[Agent] = None
 

@@ -55,7 +55,7 @@ def create_llm(config: Optional[LLMManagerConfig] = None) -> LLM:
 
     return LLM(
         model=model_name,
-        api_key=provider_config.api_key or os.getenv("MINIMAX_API_KEY", ""),
+        api_key=provider_config.api_key or os.getenv("MIMO_API_KEY", ""),
         base_url=provider_config.base_url,
         temperature=provider_config.temperature,
         max_tokens=provider_config.max_tokens,

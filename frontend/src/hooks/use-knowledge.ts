@@ -100,3 +100,37 @@ export function useSearchKnowledge(query: string) {
     staleTime: 30 * 1000,
   });
 }
+
+export interface VectorStats {
+  total: number;
+  synced: number;
+  pending: number;
+  failed: number;
+}
+
+export function useVectorStats() {
+  return useQuery<VectorStats>({
+    queryKey: ['knowledge', 'vector-stats'],
+    queryFn: async () => {
+      const res = await fetch('/api/v1/dashboard/vector-stats', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+          'X-Enterprise-Id': localStorage.getItem('enterprise_id') || '',
+        },
+      });
+      if (!res.ok) throw new Error('获取向量统计失败');
+      return res.json();
+    },
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useResyncKnowledge() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => knowledgeApi.resync(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge'] });
+    },
+  });
+}

@@ -257,6 +257,23 @@ class VectorStoreTool:
 
         return results
 
+    def update_embedding(
+        self,
+        record_id: int,
+        embedding: list[float],
+    ):
+        """
+        单独更新某条记录的 embedding 字段
+
+        Args:
+            record_id: 记录 ID
+            embedding: 1024 维向量
+        """
+        sql = "UPDATE knowledge_base SET embedding = %s::vector, sync_status = 'synced' WHERE id = %s"
+        with self.conn.cursor() as cur:
+            cur.execute(sql, (str(embedding), record_id))
+            self.conn.commit()
+
     def count(
         self,
         data_level: Optional[str] = None,
