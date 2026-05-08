@@ -1,0 +1,2243 @@
+========== FILE: frontend\src\app\create\page.tsx ========== 
+'use client';
+
+import { AppLayout } from '@/components/layout/app-layout';
+import { useCreateStore } from '@/stores/create-store';
+import { PreviewPanel } from '@/components/create/preview-panel';
+import { StepInput } from '@/components/create/step-input';
+import { StepTopic } from '@/components/create/step-topic';
+import { StepMaterial } from '@/components/create/step-material';
+import { StepTitle } from '@/components/create/step-title';
+import { StepArticle } from '@/components/create/step-article';
+import { StepTags } from '@/components/create/step-tags';
+import { StepOutput } from '@/components/create/step-output';
+
+const STEP_COMPONENTS: Record<string, React.ComponentType> = {
+  input: StepInput,
+  topic: StepTopic,
+  material: StepMaterial,
+  title: StepTitle,
+  article: StepArticle,
+  tags: StepTags,
+  output: StepOutput,
+};
+
+export default function CreatePage() {
+  const { currentStep, steps } = useCreateStore();
+
+  const StepComponent = STEP_COMPONENTS[currentStep] || StepInput;
+
+  return (
+    <AppLayout>
+      <div className="flex h-[calc(100vh-7rem)] gap-6">
+        {/* 左侧：步骤指示器 */}
+        <div className="w-48 shrink-0">
+          <div className="sticky top-6">
+            <h2 className="text-lg font-bold mb-4">创作流程</h2>
+            <StepIndicatorVertical steps={steps} />
+          </div>
+        </div>
+
+        {/* 中间：主操作区 */}
+        <div className="flex-1 overflow-y-auto pr-2">
+          <div className="max-w-2xl">
+            <StepComponent />
+          </div>
+        </div>
+
+        {/* 右侧：实时预览 */}
+        <div className="w-80 shrink-0 border border-border rounded-lg bg-background overflow-hidden">
+          <PreviewPanel />
+        </div>
+      </div>
+    </AppLayout>
+  );
+}
+
+function StepIndicatorVertical({
+  steps,
+}: {
+  steps: Array<{ label: string; status: 'pending' | 'active' | 'completed' | 'error' }>;
+}) {
+  return (
+    <div className="space-y-1">
+      {steps.map((step, index) => {
+        const isActive = step.status === 'active';
+        const isCompleted = step.status === 'completed';
+        const isError = step.status === 'error';
+
+        return (
+          <div key={step.label} className="flex items-start gap-3">
+            {/* 连接线和圆点 */}
+            <div className="flex flex-col items-center">
+              <div
+                className={
+                  'flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium transition-colors ' +
+                  (isCompleted
+                    ? 'bg-green-500 text-white'
+                    : isActive
+                      ? 'bg-primary text-primary-foreground'
+                      : isError
+                        ? 'bg-destructive text-destructive-foreground'
+                        : 'bg-muted text-muted-foreground')
+                }
+              >
+                {isCompleted ? '✓' : index + 1}
+              </div>
+              {index < steps.length - 1 && (
+                <div
+                  className={
+                    'w-0.5 h-6 mt-1 ' +
+                    (isCompleted ? 'bg-green-500' : 'bg-muted')
+                  }
+                />
+              )}
+            </div>
+
+            {/* 标签 */}
+            <div className="pt-1.5">
+              <span
+                className={
+                  'text-sm ' +
+                  (isActive
+                    ? 'font-medium text-foreground'
+                    : isCompleted
+                      ? 'text-muted-foreground'
+                      : isError
+                        ? 'text-destructive'
+                        : 'text-muted-foreground')
+                }
+              >
+                {step.label}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+ 
+========== FILE: frontend\src\stores\create-store.ts ========== 
+import { create } from 'zustand';
+import { Platform, TaskStatus, MaterialPack, TitleOption, NoteOutput, ComplianceReport, AgentStatusType } from '@/types';
+
+export interface TopicOption {
+  title: string;
+  angle: string;
+  keywords: string[];
+  score: number;
+}
+import { createApi } from '@/lib/api';
+
+export type CreateMode = 'quick' | 'full';
+export type CreateStep = 'input' | 'topic' | 'material' | 'title' | 'article' | 'tags' | 'output';
+
+export interface StepStatus {
+  step: CreateStep;
+  label: string;
+  status: 'pending' | 'active' | 'completed' | 'error';
+}
+
+export interface AgentState {
+  name: string;
+  status: AgentStatusType;
+  message?: string;
+}
+
+interface CreateStore {
+  // 流程状态
+  platform: Platform | null;
+  mode: CreateMode;
+  currentStep: CreateStep;
+  steps: StepStatus[];
+  taskStatus: TaskStatus;
+  taskId: string | null;
+
+  // Step 1 - 输入需求
+  brand: string;
+  product: string;
+  intent: string;
+  scene: string;
+  style: string;
+
+  // Step 2 - 选题推荐（full模式）
+  topicOptions: TopicOption[];
+  selectedTopic: string;
+
+  // Step 3 - 素材确认
+  materialPack: MaterialPack | null;
+  materialMissing: string[];
+
+  // Step 3 - 标题选择
+  titleOptions: TitleOption[];
+  selectedTitles: string[];
+  titleRetries: number;
+  maxTitleRetries: number;
+  customTitle: string;
+
+  // Step 4 - 正文创作
+  article: string;
+  aiScore: number;
+  aiScoreDetails: Record<string, number>;
+  articleRetries: number;
+  maxArticleRetries: number;
+  isEditing: boolean;
+
+  // Step 5 - 标签与合规
+  tags: string[];
+  customTag: string;
+  complianceReport: ComplianceReport | null;
+  complianceOverrides: Record<string, 'pass' | 'modify' | 'delete'>;
+
+  // Step 6 - 输出
+  output: NoteOutput | null;
+
+  // Agent 状态
+  agents: AgentState[];
+  isProcessing: boolean;
+
+  // 错误信息
+  error: string | null;
+
+  // Actions
+  setMode: (mode: CreateMode) => void;
+  setPlatform: (platform: Platform) => void;
+  setBrand: (brand: string) => void;
+  setProduct: (product: string) => void;
+  setIntent: (intent: string) => void;
+  setScene: (scene: string) => void;
+  setStyle: (style: string) => void;
+  setTopicOptions: (options: TopicOption[]) => void;
+  selectTopic: (topic: string) => void;
+  setCurrentStep: (step: CreateStep) => void;
+  setStepStatus: (step: CreateStep, status: StepStatus['status']) => void;
+  setMaterialPack: (pack: MaterialPack) => void;
+  setMaterialMissing: (missing: string[]) => void;
+  setTitleOptions: (options: TitleOption[]) => void;
+  toggleTitle: (title: string) => void;
+  setCustomTitle: (title: string) => void;
+  setTitleRetries: (count: number) => void;
+  setArticle: (article: string) => void;
+  setAiScore: (score: number) => void;
+  setAiScoreDetails: (details: Record<string, number>) => void;
+  setArticleRetries: (count: number) => void;
+  setIsEditing: (editing: boolean) => void;
+  regenerateArticle: () => Promise<void>;
+  refreshTitles: () => Promise<void>;
+  setTags: (tags: string[]) => void;
+  toggleTag: (tag: string) => void;
+  addCustomTag: (tag: string) => void;
+  removeTag: (tag: string) => void;
+  setCustomTag: (tag: string) => void;
+  setComplianceReport: (report: ComplianceReport) => void;
+  setComplianceOverride: (issueType: string, action: 'pass' | 'modify' | 'delete') => void;
+  setOutput: (output: NoteOutput) => void;
+  setTaskId: (id: string) => void;
+  setTaskStatus: (status: TaskStatus) => void;
+  selectTitle: (titleIndex: number) => Promise<void>;
+  confirmP2Decision: (accept: boolean) => Promise<void>;
+  setAgents: (agents: AgentState[]) => void;
+  updateAgent: (name: string, status: AgentStatusType, message?: string) => void;
+  setIsProcessing: (processing: boolean) => void;
+  setError: (error: string | null) => void;
+  goToStep: (step: CreateStep) => void;
+  nextStep: () => void;
+  prevStep: () => void;
+  startCreation: () => Promise<void>;
+  reset: () => void;
+}
+
+const STEP_ORDER: CreateStep[] = ['input', 'topic', 'material', 'title', 'article', 'tags', 'output'];
+
+const QUICK_STEPS: StepStatus[] = [
+  { step: 'input', label: '输入需求', status: 'active' },
+  { step: 'material', label: '素材确认', status: 'pending' },
+  { step: 'title', label: '标题选择', status: 'pending' },
+  { step: 'article', label: '正文创作', status: 'pending' },
+  { step: 'tags', label: '标签与合规', status: 'pending' },
+  { step: 'output', label: '完成交付', status: 'pending' },
+];
+
+const FULL_STEPS: StepStatus[] = [
+  { step: 'input', label: '输入需求', status: 'active' },
+  { step: 'topic', label: '选题推荐', status: 'pending' },
+  { step: 'material', label: '素材确认', status: 'pending' },
+  { step: 'title', label: '标题选择', status: 'pending' },
+  { step: 'article', label: '正文创作', status: 'pending' },
+  { step: 'tags', label: '标签与合规', status: 'pending' },
+  { step: 'output', label: '完成交付', status: 'pending' },
+];
+
+const INITIAL_STATE = {
+  platform: null as Platform | null,
+  mode: 'quick' as CreateMode,
+  currentStep: 'input' as CreateStep,
+  steps: QUICK_STEPS,
+  taskStatus: 'pending' as TaskStatus,
+  taskId: null as string | null,
+
+  brand: '',
+  product: '',
+  intent: '',
+  scene: '',
+  style: '',
+
+  topicOptions: [] as TopicOption[],
+  selectedTopic: '',
+
+  materialPack: null as MaterialPack | null,
+  materialMissing: [] as string[],
+
+  titleOptions: [] as TitleOption[],
+  selectedTitles: [] as string[],
+  titleRetries: 0,
+  maxTitleRetries: 2,
+  customTitle: '',
+
+  article: '',
+  aiScore: 0,
+  aiScoreDetails: {} as Record<string, number>,
+  articleRetries: 0,
+  maxArticleRetries: 2,
+  isEditing: false,
+
+  tags: [] as string[],
+  customTag: '',
+  complianceReport: null as ComplianceReport | null,
+  complianceOverrides: {} as Record<string, 'pass' | 'modify' | 'delete'>,
+
+  output: null as NoteOutput | null,
+
+  agents: [] as AgentState[],
+  isProcessing: false,
+
+  error: null as string | null,
+};
+
+// 轮询任务状态的辅助函数
+function _pollTaskStatus(
+  taskId: string,
+  set: (partial: Partial<CreateStore>) => void,
+) {
+  const poll = async () => {
+    try {
+      const res = await createApi.getTaskStatus(taskId);
+      if (!res.success || !res.data) return;
+
+      const data = res.data as { status: string; progress?: number; current_step?: string };
+      if (data.status === 'completed') {
+        // 获取结果
+        const resultRes = await createApi.getTaskResult(taskId);
+        if (resultRes.success && resultRes.data) {
+          const result = (resultRes.data as { result?: Record<string, unknown> }).result || resultRes.data;
+          set({
+            materialPack: (result as Record<string, unknown>).material_pack as MaterialPack || null,
+            materialMissing: (result as Record<string, unknown>).material_pack ? [] : ['素材包未返回'],
+            titleOptions: (result as Record<string, unknown>).title_options as TitleOption[] || [],
+            article: (result as Record<string, unknown>).article as string || '',
+            aiScore: (result as Record<string, unknown>).ai_flavor_score as number || 0,
+            tags: (result as Record<string, unknown>).tags as string[] || [],
+            complianceReport: (result as Record<string, unknown>).compliance_report as ComplianceReport || null,
+            taskStatus: 'completed' as TaskStatus,
+            isProcessing: false,
+          });
+        }
+      } else if (data.status === 'failed') {
+        set({ error: '创作失败', isProcessing: false, taskStatus: 'failed' as TaskStatus });
+      } else {
+        // 继续轮询
+        setTimeout(poll, 2000);
+      }
+    } catch {
+      setTimeout(poll, 3000);
+    }
+  };
+  setTimeout(poll, 1000);
+}
+
+export const useCreateStore = create<CreateStore>((set, get) => ({
+  ...INITIAL_STATE,
+
+  setMode: (mode) => set({ mode, steps: mode === 'full' ? FULL_STEPS : QUICK_STEPS }),
+  setPlatform: (platform) => set({ platform }),
+  setBrand: (brand) => set({ brand }),
+  setProduct: (product) => set({ product }),
+  setIntent: (intent) => set({ intent }),
+  setScene: (scene) => set({ scene }),
+  setStyle: (style) => set({ style }),
+
+  setTopicOptions: (options) => set({ topicOptions: options }),
+  selectTopic: (topic) => set({ selectedTopic: topic }),
+
+  setCurrentStep: (step) => {
+    const steps = get().steps.map((s) => {
+      const stepIndex = STEP_ORDER.indexOf(s.step);
+      const targetIndex = STEP_ORDER.indexOf(step);
+      if (stepIndex < targetIndex) return { ...s, status: 'completed' as const };
+      if (stepIndex === targetIndex) return { ...s, status: 'active' as const };
+      return { ...s, status: 'pending' as const };
+    });
+    set({ currentStep: step, steps });
+  },
+
+  setStepStatus: (step, status) =>
+    set((state) => ({
+      steps: state.steps.map((s) =>
+        s.step === step ? { ...s, status } : s
+      ),
+    })),
+
+  setMaterialPack: (pack) => set({ materialPack: pack }),
+  setMaterialMissing: (missing) => set({ materialMissing: missing }),
+
+  setTitleOptions: (options) => set({ titleOptions: options }),
+
+  toggleTitle: (title) =>
+    set((state) => {
+      const exists = state.selectedTitles.includes(title);
+      if (exists) {
+        return { selectedTitles: state.selectedTitles.filter((t) => t !== title) };
+      }
+      if (state.selectedTitles.length >= 2) return state;
+      return { selectedTitles: [...state.selectedTitles, title] };
+    }),
+
+  setCustomTitle: (title) => set({ customTitle: title }),
+  setTitleRetries: (count) => set({ titleRetries: count }),
+
+  setArticle: (article) => set({ article }),
+  setAiScore: (score) => set({ aiScore: score }),
+  setAiScoreDetails: (details) => set({ aiScoreDetails: details }),
+  setArticleRetries: (count) => set({ articleRetries: count }),
+  setIsEditing: (editing) => set({ isEditing: editing }),
+
+  regenerateArticle: async () => {
+    const state = get();
+    if (state.articleRetries >= state.maxArticleRetries) return;
+
+    set({ isProcessing: true, articleRetries: state.articleRetries + 1 });
+
+    // 模拟重新生成（开发模式）
+    await new Promise((r) => setTimeout(r, 1500));
+
+    const variants = [
+      "姐妹们我真的要跪谢这款护肝片了！连续加班一个月，每天凌晨才睡，多亏它续命。吃之前每天早上起来跟行尸走肉似的，现在精神状态好太多了。不过每个人体质不一样，效果因人而异哈，别杠。",
+      "打工人自救好物分享！这款护肝片我已经吃第二瓶了，最直观的变化就是熬夜之后第二天没那么难受了。成分主要是水飞蓟素，查了一下确实有研究支持。当然不是让你放心熬夜啊，能早睡还是早睡！",
+      "被同事安利的护肝片，本来没抱希望，结果真香了。连续吃了三周，感觉整个人没那么容易疲惫了。配料表很干净，水飞蓟素+姜黄素，都是护肝的好东西。不过孕妇和哺乳期的姐妹就别吃了哈。",
+    ];
+
+    const idx = state.articleRetries % variants.length;
+    const newScore = 75 + Math.floor(Math.random() * 15);
+
+    set({
+      article: variants[idx],
+      aiScore: newScore,
+      aiScoreDetails: {
+        '去AI味': 80 + Math.floor(Math.random() * 15),
+        '口语化': 75 + Math.floor(Math.random() * 15),
+        '情感共鸣': 70 + Math.floor(Math.random() * 20),
+        '信息密度': 75 + Math.floor(Math.random() * 15),
+        '可读性': 80 + Math.floor(Math.random() * 15),
+      },
+      isProcessing: false,
+    });
+  },
+
+  refreshTitles: async () => {
+    const state = get();
+    if (state.titleRetries >= state.maxTitleRetries) return;
+
+    set({ isProcessing: true, titleRetries: state.titleRetries + 1, selectedTitles: [] });
+
+    await new Promise((r) => setTimeout(r, 1200));
+
+    const batches = [
+      [
+        { title: "被问了100遍的护肝片，终于来交作业了", strategy: "悬念型", score: 90, reason: "利用好奇心驱动点击" },
+        { title: "打工人の肝脏保卫战｜真实体验分享", strategy: "人设型", score: 87, reason: "人设代入感强" },
+        { title: "这款护肝片凭什么让我回购三次？", strategy: "反问型", score: 85, reason: "反问引发思考" },
+        { title: "熬夜党的救星！亲测30天护肝片效果", strategy: "数据型", score: 83, reason: "具体数据增加可信度" },
+      ],
+      [
+        { title: "别再交智商税了！护肝片就选这一款", strategy: "否定型", score: 91, reason: "否定常见认知引发关注" },
+        { title: "我的肝脏是怎么被这款片救回来的", strategy: "故事型", score: 88, reason: "叙事驱动，情感共鸣" },
+        { title: "护肝片选购避坑指南｜成分党必看", strategy: "清单型", score: 86, reason: "干货价值感强" },
+        { title: "从怀疑到真香｜我与护肝片的故事", strategy: "转变型", score: 84, reason: "心态转变引发共鸣" },
+      ],
+      [
+        { title: "同事问我最近气色怎么变好了", strategy: "场景型", score: 89, reason: "场景化描述引发好奇" },
+        { title: "这瓶护肝片我愿称之为加班神器", strategy: "评价型", score: 86, reason: "强烈推荐感" },
+        { title: "护肝片到底有没有用？30天实测告诉你", strategy: "问答型", score: 84, reason: "解答用户疑问" },
+        { title: "熬夜不伤肝的秘密武器", strategy: "利益型", score: 82, reason: "直接点明利益点" },
+      ],
+    ];
+
+    const batchIdx = state.titleRetries % batches.length;
+    set({
+      titleOptions: batches[batchIdx],
+      isProcessing: false,
+    });
+  },
+
+  setTags: (tags) => set({ tags }),
+  toggleTag: (tag) =>
+    set((state) => {
+      const exists = state.tags.includes(tag);
+      return { tags: exists ? state.tags.filter((t) => t !== tag) : [...state.tags, tag] };
+    }),
+  addCustomTag: (tag) =>
+    set((state) => {
+      if (!tag || state.tags.includes(tag)) return state;
+      return { tags: [...state.tags, tag], customTag: '' };
+    }),
+  removeTag: (tag) =>
+    set((state) => ({ tags: state.tags.filter((t) => t !== tag) })),
+  setCustomTag: (tag) => set({ customTag: tag }),
+
+  setComplianceReport: (report) => set({ complianceReport: report }),
+  setComplianceOverride: (issueType, action) =>
+    set((state) => ({
+      complianceOverrides: { ...state.complianceOverrides, [issueType]: action },
+    })),
+
+  setOutput: (output) => set({ output }),
+  setTaskId: (id) => set({ taskId: id }),
+  setTaskStatus: (status) => set({ taskStatus: status }),
+
+  selectTitle: async (titleIndex: number) => {
+    const { taskId } = get();
+    if (!taskId) return;
+
+    set({ isProcessing: true });
+    try {
+      const res = await createApi.selectTitle(taskId, titleIndex);
+      if (!res.success) {
+        set({ error: res.error || '标题选择失败', isProcessing: false });
+      }
+      // 后端收到后会继续执行，WebSocket 会推送后续消息
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : '网络错误', isProcessing: false });
+    }
+  },
+
+  confirmP2Decision: async (accept: boolean) => {
+    const { taskId } = get();
+    if (!taskId) return;
+
+    set({ isProcessing: true });
+    try {
+      const res = await createApi.p2Decision(taskId, accept);
+      if (!res.success) {
+        set({ error: res.error || '决策提交失败', isProcessing: false });
+      }
+      // 后端收到后会继续执行，WebSocket 会推送 completed 消息
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : '网络错误', isProcessing: false });
+    }
+  },
+
+  setAgents: (agents) => set({ agents }),
+  updateAgent: (name, status, message) =>
+    set((state) => ({
+      agents: state.agents.map((a) =>
+        a.name === name ? { ...a, status, message } : a
+      ),
+    })),
+  setIsProcessing: (processing) => set({ isProcessing: processing }),
+  setError: (error) => set({ error }),
+
+  goToStep: (step) => {
+    const { setCurrentStep } = get();
+    setCurrentStep(step);
+  },
+
+  nextStep: () => {
+    const { currentStep, setCurrentStep } = get();
+    const index = STEP_ORDER.indexOf(currentStep);
+    if (index < STEP_ORDER.length - 1) {
+      setCurrentStep(STEP_ORDER[index + 1]);
+    }
+  },
+
+  prevStep: () => {
+    const { currentStep, setCurrentStep } = get();
+    const index = STEP_ORDER.indexOf(currentStep);
+    if (index > 0) {
+      setCurrentStep(STEP_ORDER[index - 1]);
+    }
+  },
+
+  startCreation: async () => {
+    const state = get();
+    set({ isProcessing: true, error: null });
+
+    try {
+      // 根据模式调用不同接口
+      const apiCall = state.mode === 'full'
+        ? createApi.startFullCreation({
+            product: state.product,
+            scene: state.scene,
+            persona: state.intent,
+            platform: state.platform || 'xiaohongshu',
+            mode: 'full',
+          })
+        : createApi.startCreation({
+            product: state.product,
+            scene: state.scene,
+            persona: state.intent,
+            platform: state.platform || 'xiaohongshu',
+          });
+
+      const res = await apiCall;
+
+      if (!res.success || !res.data) {
+        set({ error: res.error || '创作请求失败', isProcessing: false });
+        return;
+      }
+
+      // 后端返回 task_id，连接 WebSocket 监听进度
+      const taskData = res.data as { task_id: string; status: string };
+      const taskId = taskData.task_id;
+      set({ taskId, taskStatus: 'processing' as TaskStatus });
+
+      // 连接 WebSocket
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const wsBase = apiBase.replace(/^http/, 'ws');
+      const wsUrl = `${wsBase}/api/v1/create/ws/${taskId}`;
+      try {
+        const ws = new WebSocket(wsUrl);
+
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+
+          switch (data.type) {
+            case 'progress':
+              set({ isProcessing: true });
+              break;
+
+            case 'topic_options':
+              set({
+                topicOptions: data.topic_options || [],
+                isProcessing: false,
+              });
+              break;
+
+            case 'material_ready':
+              set({
+                materialPack: data.material_pack || null,
+                materialMissing: data.missing_fields || [],
+                isProcessing: false,
+              });
+              break;
+
+            case 'awaiting_title_selection':
+              set({
+                titleOptions: data.title_options || [],
+                taskStatus: 'awaiting_title_selection' as TaskStatus,
+                isProcessing: false,
+              });
+              break;
+
+            case 'title_selected':
+              set({ taskStatus: 'running' as TaskStatus, isProcessing: true });
+              break;
+
+            case 'article_ready':
+              set({
+                article: data.article || '',
+                aiScore: data.ai_flavor_score || 0,
+                isProcessing: false,
+              });
+              break;
+
+            case 'compliance_issues':
+              set({
+                complianceReport: {
+                  status: 'has_issues',
+                  p0_issues: data.p0_issues || [],
+                  p1_issues: [],
+                  p2_issues: [],
+                  suggestions: [],
+                },
+                taskStatus: 'awaiting_p2_decision' as TaskStatus,
+                isProcessing: false,
+              });
+              break;
+
+            case 'completed':
+              if (data.result) {
+                const result = data.result;
+                set({
+                  topicOptions: result.topic_options || get().topicOptions,
+                  materialPack: result.material_pack || null,
+                  materialMissing: result.material_pack ? [] : ['素材包未返回'],
+                  titleOptions: result.title_options || [],
+                  article: result.article || '',
+                  aiScore: result.ai_flavor_score || 0,
+                  tags: result.tags || [],
+                  complianceReport: result.compliance_report || null,
+                  taskStatus: 'completed' as TaskStatus,
+                  isProcessing: false,
+                });
+              }
+              ws.close();
+              break;
+
+            case 'failed':
+              set({ error: data.error || '创作失败', isProcessing: false, taskStatus: 'failed' as TaskStatus });
+              ws.close();
+              break;
+          }
+        };
+
+        ws.onerror = () => {
+          // WebSocket 连接失败，轮询状态
+          console.warn('WebSocket 连接失败，使用轮询');
+          _pollTaskStatus(taskId, set);
+        };
+
+        ws.onclose = () => {
+          // 如果还在处理中，用轮询兜底
+          const currentState = get();
+          if (currentState.isProcessing) {
+            _pollTaskStatus(taskId, set);
+          }
+        };
+      } catch {
+        // WebSocket 不可用，直接轮询
+        _pollTaskStatus(taskId, set);
+      }
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : '网络错误',
+        isProcessing: false,
+      });
+    }
+  },
+
+  reset: () => set(INITIAL_STATE),
+}));
+ 
+========== FILE: frontend\src\lib\api.ts ========== 
+import { ApiResponse } from '@/types';
+import { auth } from '@/lib/auth';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+// 请求拦截器类型
+type RequestInterceptor = (config: RequestInit & { url: string }) => RequestInit & { url: string };
+// 响应拦截器类型
+type ResponseInterceptor = (response: Response) => Response | Promise<Response>;
+// 错误处理器类型
+type ErrorHandler = (error: Error, endpoint: string) => void;
+
+class ApiClient {
+  private baseUrl: string;
+  private requestInterceptors: RequestInterceptor[] = [];
+  private responseInterceptors: ResponseInterceptor[] = [];
+  private errorHandlers: ErrorHandler[] = [];
+
+  constructor(baseUrl: string) {
+    this.baseUrl = baseUrl;
+  }
+
+  // 添加请求拦截器
+  addRequestInterceptor(interceptor: RequestInterceptor): void {
+    this.requestInterceptors.push(interceptor);
+  }
+
+  // 添加响应拦截器
+  addResponseInterceptor(interceptor: ResponseInterceptor): void {
+    this.responseInterceptors.push(interceptor);
+  }
+
+  // 添加错误处理器
+  addErrorHandler(handler: ErrorHandler): void {
+    this.errorHandlers.push(handler);
+  }
+
+  private getHeaders(): HeadersInit {
+    return auth.getAuthHeaders();
+  }
+
+  private async request<T>(
+    endpoint: string,
+    options: RequestInit = {}
+  ): Promise<ApiResponse<T>> {
+    try {
+      let config: RequestInit & { url: string } = {
+        ...options,
+        url: `${this.baseUrl}${endpoint}`,
+        headers: {
+          ...this.getHeaders(),
+          ...options.headers,
+        },
+      };
+
+      // 执行请求拦截器
+      for (const interceptor of this.requestInterceptors) {
+        config = interceptor(config);
+      }
+
+      let response = await fetch(config.url, config);
+
+      // 执行响应拦截器
+      for (const interceptor of this.responseInterceptors) {
+        response = await interceptor(response);
+      }
+
+      if (response.status === 401) {
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('enterprise_id');
+          localStorage.removeItem('user');
+          window.location.href = '/login';
+        }
+        return {
+          success: false,
+          data: null,
+          error: '登录已过期，请重新登录',
+        };
+      }
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        const errorMsg = data.detail || data.message || `请求失败 (${response.status})`;
+        return {
+          success: false,
+          data: null,
+          error: errorMsg,
+        };
+      }
+
+      return {
+        success: true,
+        data,
+        error: null,
+      };
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error('网络错误');
+
+      // 执行错误处理器
+      for (const handler of this.errorHandlers) {
+        handler(err, endpoint);
+      }
+
+      return {
+        success: false,
+        data: null,
+        error: err.message,
+      };
+    }
+  }
+
+  async get<T>(endpoint: string, params?: Record<string, string>): Promise<ApiResponse<T>> {
+    let url = endpoint;
+    if (params) {
+      const searchParams = new URLSearchParams(params);
+      url = `${endpoint}?${searchParams.toString()}`;
+    }
+    return this.request<T>(url, { method: 'GET' });
+  }
+
+  async post<T>(endpoint: string, body?: unknown): Promise<ApiResponse<T>> {
+    return this.request<T>(endpoint, {
+      method: 'POST',
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  async put<T>(endpoint: string, body?: unknown): Promise<ApiResponse<T>> {
+    return this.request<T>(endpoint, {
+      method: 'PUT',
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  async patch<T>(endpoint: string, body?: unknown): Promise<ApiResponse<T>> {
+    return this.request<T>(endpoint, {
+      method: 'PATCH',
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  async delete<T>(endpoint: string): Promise<ApiResponse<T>> {
+    return this.request<T>(endpoint, { method: 'DELETE' });
+  }
+
+  // 上传文件
+  async upload<T>(endpoint: string, formData: FormData): Promise<ApiResponse<T>> {
+    try {
+      const authHeaders = auth.getAuthHeaders();
+      // 上传时不能设置 Content-Type（浏览器自动设置 multipart boundary）
+      const { 'Content-Type': _, ...headers } = authHeaders as Record<string, string>;
+
+      const response = await fetch(`${this.baseUrl}${endpoint}`, {
+        method: 'POST',
+        headers,
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        return {
+          success: false,
+          data: null,
+          error: data.detail || data.message || '上传失败',
+        };
+      }
+
+      return {
+        success: true,
+        data,
+        error: null,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        data: null,
+        error: error instanceof Error ? error.message : '上传失败',
+      };
+    }
+  }
+}
+
+export const apiClient = new ApiClient(API_BASE_URL);
+
+// 知识库 API
+export const knowledgeApi = {
+  getList: (params?: { category?: string; page?: number; page_size?: number }) => {
+    const queryParams: Record<string, string> = {};
+    if (params?.category) queryParams.category = params.category;
+    if (params?.page) queryParams.page = params.page.toString();
+    if (params?.page_size) queryParams.page_size = params.page_size.toString();
+    return apiClient.get('/api/v1/tenant/knowledge/items', queryParams);
+  },
+
+  getTree: () => apiClient.get('/api/v1/tenant/knowledge/tree'),
+
+  create: (data: { title: string; content: string; category: string; tags?: string[] }) =>
+    apiClient.post('/api/v1/tenant/knowledge/items', data),
+
+  update: (id: string, data: { title?: string; content?: string; category?: string; tags?: string[] }) =>
+    apiClient.put(`/api/v1/tenant/knowledge/items/${id}`, data),
+
+  delete: (id: string) => apiClient.delete(`/api/v1/tenant/knowledge/items/${id}`),
+
+  search: (query: string, category?: string, limit?: number) =>
+    apiClient.post('/api/v1/tenant/knowledge/search', { query, category, limit: limit || 10 }),
+
+  upload: (formData: FormData) => apiClient.upload('/api/v1/tenant/knowledge/upload', formData),
+
+  resync: (id: string) => apiClient.post(`/api/v1/tenant/knowledge/items/${id}/resync`),
+};
+
+// 创作任务 API
+export const createApi = {
+  startCreation: (data: { product: string; scene?: string; persona?: string; platform?: string }) =>
+    apiClient.post('/api/v1/create/start', data),
+
+  startFullCreation: (data: { product: string; scene?: string; persona?: string; platform?: string; mode?: string }) =>
+    apiClient.post('/api/v1/create/start-full', data),
+
+  getTaskStatus: (taskId: string) => apiClient.get(`/api/v1/create/${taskId}/status`),
+
+  selectTitle: (taskId: string, titleIndex: number) =>
+    apiClient.post(`/api/v1/create/${taskId}/select-title`, { title_index: titleIndex }),
+
+  p2Decision: (taskId: string, accept: boolean, customText?: string) =>
+    apiClient.post(`/api/v1/create/${taskId}/p2-decision`, { accept, custom_text: customText }),
+
+  getTaskResult: (taskId: string) => apiClient.get(`/api/v1/create/${taskId}/result`),
+};
+
+// Agent 独立调用 API
+export const agentsApi = {
+  run: (data: { agent_name: string; method: string; params: Record<string, unknown> }) =>
+    apiClient.post('/api/v1/agents/run', data),
+
+  titleGenerate: (data: { topic: string; material_pack: Record<string, unknown>; historical_titles?: string[] }) =>
+    apiClient.post('/api/v1/agents/title/generate', data),
+
+  articleGenerate: (data: { title: string; material_pack: Record<string, unknown> }) =>
+    apiClient.post('/api/v1/agents/article/generate', data),
+
+  tagGenerate: (data: { article: string; title: string; material_pack: Record<string, unknown> }) =>
+    apiClient.post('/api/v1/agents/tag/generate', data),
+
+  complianceCheck: (data: { title: string; article: string; tags?: string[]; brand_taboos?: string[] }) =>
+    apiClient.post('/api/v1/agents/compliance/check', data),
+
+  topicGenerate: (data: { category: string; product: string; brand_name?: string; target_persona?: string; num_topics?: number }) =>
+    apiClient.post('/api/v1/agents/topic/generate', data),
+
+  materialSearch: (data: { product: string; scene?: string; persona?: string; enterprise_id?: string }) =>
+    apiClient.post('/api/v1/agents/material/search', data),
+
+  kbSearch: (data: { query: string; category?: string; tags?: string[]; limit?: number }) =>
+    apiClient.post('/api/v1/agents/kb/search', data),
+
+  analyticsReport: (data: { period_start: string; period_end: string; content_data?: Record<string, unknown> }) =>
+    apiClient.post('/api/v1/agents/analytics/report', data),
+
+  operationPlan: (data: { pending_content: Record<string, unknown>; target_platforms: string[]; start_date?: string }) =>
+    apiClient.post('/api/v1/agents/operation/plan', data),
+
+  wechatGenerate: (data: { topic: string; material_pack: Record<string, unknown>; target_length?: number }) =>
+    apiClient.post('/api/v1/agents/wechat/generate', data),
+
+  douyinGenerate: (data: { topic: string; material_pack: Record<string, unknown>; duration_seconds?: number }) =>
+    apiClient.post('/api/v1/agents/douyin/generate', data),
+
+  orchestratorRoute: (data: { user_input: string }) =>
+    apiClient.post('/api/v1/agents/orchestrator/route', data),
+
+  listAgents: () => apiClient.get('/api/v1/agents/list'),
+};
+
+// 笔记 API
+export const notesApi = {
+  getDetail: (noteId: string) => apiClient.get(`/api/v1/notes/${noteId}`),
+
+  update: (noteId: string, data: { title?: string; article?: string; tags?: string[] }) =>
+    apiClient.put(`/api/v1/notes/${noteId}`, data),
+
+  delete: (noteId: string) => apiClient.delete(`/api/v1/notes/${noteId}`),
+};
+
+// 数据分析 API
+export const analyticsApi = {
+  getSummary: () => apiClient.get('/api/v1/dashboard/summary'),
+
+  getTrends: (days?: number) => {
+    const queryParams: Record<string, string> = {};
+    if (days) queryParams.days = days.toString();
+    return apiClient.get('/api/v1/dashboard/trends', queryParams);
+  },
+
+  getTopics: () => apiClient.get('/api/v1/dashboard/topics'),
+
+  getVectorStats: () => apiClient.get('/api/v1/dashboard/vector-stats'),
+
+  getNotes: (params?: { page?: number; page_size?: number; platform?: string; status?: string }) => {
+    const queryParams: Record<string, string> = {};
+    if (params?.page) queryParams.page = params.page.toString();
+    if (params?.page_size) queryParams.page_size = params.page_size.toString();
+    if (params?.platform) queryParams.platform = params.platform;
+    if (params?.status) queryParams.status = params.status;
+    return apiClient.get('/api/v1/notes', queryParams);
+  },
+};
+
+// 用户 API
+export const userApi = {
+  getProfile: () => apiClient.get('/api/v1/user/profile'),
+
+  updateProfile: (data: { name?: string; avatar_url?: string }) =>
+    apiClient.put('/api/v1/user/profile', data),
+};
+
+// 企业 API
+export const enterpriseApi = {
+  getInfo: () => apiClient.get('/api/v1/enterprise/info'),
+
+  getQuota: () => apiClient.get('/api/v1/enterprise/quota'),
+};
+
+// 平台管理 API
+export const adminApi = {
+  // 公共知识库
+  getPublicKnowledge: (params?: { category?: string; page?: number; page_size?: number }) => {
+    const queryParams: Record<string, string> = {};
+    if (params?.category) queryParams.category = params.category;
+    if (params?.page) queryParams.page = params.page.toString();
+    if (params?.page_size) queryParams.page_size = params.page_size.toString();
+    return apiClient.get('/api/v1/platform/knowledge/public', queryParams);
+  },
+
+  createPublicKnowledge: (data: { title: string; content: string; category: string; tags?: string[] }) =>
+    apiClient.post('/api/v1/platform/knowledge/public', data),
+
+  updatePublicKnowledge: (id: string, data: { title?: string; content?: string; category?: string; tags?: string[] }) =>
+    apiClient.put(`/api/v1/platform/knowledge/public/${id}`, data),
+
+  deletePublicKnowledge: (id: string) => apiClient.delete(`/api/v1/platform/knowledge/public/${id}`),
+
+  // 行业知识库
+  getIndustryKnowledge: (params?: { industry?: string; page?: number; page_size?: number }) => {
+    const queryParams: Record<string, string> = {};
+    if (params?.industry) queryParams.industry = params.industry;
+    if (params?.page) queryParams.page = params.page.toString();
+    if (params?.page_size) queryParams.page_size = params.page_size.toString();
+    return apiClient.get('/api/v1/platform/knowledge/industry', queryParams);
+  },
+
+  createIndustryKnowledge: (data: { title: string; content: string; category: string; industry: string; tags?: string[] }) =>
+    apiClient.post('/api/v1/platform/knowledge/industry', data),
+
+  updateIndustryKnowledge: (id: string, data: { title?: string; content?: string; category?: string; industry?: string; tags?: string[] }) =>
+    apiClient.put(`/api/v1/platform/knowledge/industry/${id}`, data),
+
+  deleteIndustryKnowledge: (id: string) => apiClient.delete(`/api/v1/platform/knowledge/industry/${id}`),
+
+  // 模板
+  getTemplates: (params?: { platform?: string }) => {
+    const queryParams: Record<string, string> = {};
+    if (params?.platform) queryParams.platform = params.platform;
+    return apiClient.get('/api/v1/platform/templates', queryParams);
+  },
+
+  createTemplate: (data: { name: string; platform: string; content: string; category: string }) =>
+    apiClient.post('/api/v1/platform/templates', data),
+
+  updateTemplate: (id: string, data: { name?: string; platform?: string; content?: string; category?: string }) =>
+    apiClient.put(`/api/v1/platform/templates/${id}`, data),
+
+  deleteTemplate: (id: string) => apiClient.delete(`/api/v1/platform/templates/${id}`),
+
+  // 合规词库
+  getComplianceWords: (params?: { category?: string }) => {
+    const queryParams: Record<string, string> = {};
+    if (params?.category) queryParams.category = params.category;
+    return apiClient.get('/api/v1/platform/compliance', queryParams);
+  },
+
+  createComplianceWord: (data: { word: string; category: string; severity?: string; suggestion?: string }) =>
+    apiClient.post('/api/v1/platform/compliance', data),
+
+  updateComplianceWord: (id: string, data: { word?: string; category?: string; severity?: string; suggestion?: string }) =>
+    apiClient.put(`/api/v1/platform/compliance/${id}`, data),
+
+  deleteComplianceWord: (id: string) => apiClient.delete(`/api/v1/platform/compliance/${id}`),
+
+  // ── 租户管理 ──
+
+  // 企业 CRUD
+  getTenants: (params?: { plan?: string; status?: string; search?: string; page?: number; page_size?: number }) => {
+    const queryParams: Record<string, string> = {};
+    if (params?.plan) queryParams.plan = params.plan;
+    if (params?.status) queryParams.status_filter = params.status;
+    if (params?.search) queryParams.search = params.search;
+    if (params?.page) queryParams.page = params.page.toString();
+    if (params?.page_size) queryParams.page_size = params.page_size.toString();
+    return apiClient.get('/api/v1/platform/tenants', queryParams);
+  },
+
+  getTenant: (id: string) => apiClient.get(`/api/v1/platform/tenants/${id}`),
+
+  createTenant: (data: {
+    name: string; industry?: string; plan_type?: string; quota_monthly?: number;
+    admin_email: string; admin_password?: string;
+    contact_name?: string; contact_email?: string; contact_phone?: string;
+  }) => apiClient.post('/api/v1/platform/tenants', data),
+
+  updateTenant: (id: string, data: {
+    name?: string; industry?: string; plan_type?: string; quota_monthly?: number;
+    status?: string; expire_at?: string;
+    contact_name?: string; contact_email?: string; contact_phone?: string;
+  }) => apiClient.put(`/api/v1/platform/tenants/${id}`, data),
+
+  deleteTenant: (id: string) => apiClient.delete(`/api/v1/platform/tenants/${id}`),
+
+  updateTenantStatus: (id: string, status: string) =>
+    apiClient.put(`/api/v1/platform/tenants/${id}/status`, { status }),
+
+  updateTenantQuota: (id: string, quota_monthly: number, reason?: string) =>
+    apiClient.put(`/api/v1/platform/tenants/${id}/quota`, { quota_monthly, reason }),
+
+  // 企业用户管理
+  getTenantUsers: (tenantId: string) =>
+    apiClient.get(`/api/v1/platform/tenants/${tenantId}/users`),
+
+  createTenantUser: (tenantId: string, data: { email: string; name: string; password?: string; role?: string }) =>
+    apiClient.post(`/api/v1/platform/tenants/${tenantId}/users`, data),
+
+  updateUser: (userId: string, data: { name?: string; role?: string; status?: string }) =>
+    apiClient.put(`/api/v1/platform/users/${userId}`, data),
+
+  resetUserPassword: (userId: string, new_password?: string) =>
+    apiClient.put(`/api/v1/platform/users/${userId}/reset-pwd`, { new_password }),
+
+  updateUserStatus: (userId: string, status: string) =>
+    apiClient.put(`/api/v1/platform/users/${userId}/status`, { status }),
+
+  // 企业统计与日志
+  getTenantStats: (tenantId: string) =>
+    apiClient.get(`/api/v1/platform/tenants/${tenantId}/stats`),
+
+  getTenantLogs: (tenantId: string, page?: number, page_size?: number) => {
+    const queryParams: Record<string, string> = {};
+    if (page) queryParams.page = page.toString();
+    if (page_size) queryParams.page_size = page_size.toString();
+    return apiClient.get(`/api/v1/platform/tenants/${tenantId}/logs`, queryParams);
+  },
+};
+ 
+========== FILE: frontend\src\components\create\step-input.tsx ========== 
+'use client';
+
+import { useCreateStore, CreateMode } from '@/stores/create-store';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { cn } from '@/lib/utils';
+import { Sparkles, Lock, Zap, BookOpen } from 'lucide-react';
+
+const MODES = [
+  {
+    id: 'quick' as CreateMode,
+    name: '快速创作',
+    desc: '素材 → 标题 → 正文 → 标签 → 合规',
+    icon: Zap,
+  },
+  {
+    id: 'full' as CreateMode,
+    name: '数据驱动',
+    desc: '选题推荐 → 素材 → 标题 → 正文 → 标签 → 合规',
+    icon: BookOpen,
+  },
+];
+
+const PLATFORMS = [
+  {
+    id: 'xiaohongshu' as const,
+    name: '小红书',
+    desc: '图文笔记，8大标题策略，AI味评分',
+    available: true,
+  },
+  {
+    id: 'wechat' as const,
+    name: '公众号',
+    desc: '深度长文，HTML输出，安全声明',
+    available: false,
+  },
+  {
+    id: 'douyin' as const,
+    name: '抖音',
+    desc: '60秒脚本，时间戳标注，画面建议',
+    available: false,
+  },
+];
+
+const SCENE_OPTIONS = [
+  '日常种草', '好物推荐', '使用教程', '测评对比',
+  '节日营销', '新品首发', '用户故事', '行业科普',
+];
+
+const STYLE_OPTIONS = [
+  { value: '口语化', label: '口语化', desc: '像朋友聊天，亲切自然' },
+  { value: '专业', label: '专业', desc: '权威可信，数据支撑' },
+  { value: '故事型', label: '故事型', desc: '叙事驱动，情感共鸣' },
+  { value: '清单型', label: '清单型', desc: '结构清晰，干货满满' },
+];
+
+export function StepInput() {
+  const {
+    platform, mode, brand, product, intent, scene, style,
+    setPlatform, setMode, setBrand, setProduct, setIntent, setScene, setStyle, nextStep, startCreation,
+  } = useCreateStore();
+
+  const canStart = platform && product && scene && style;
+
+  return (
+    <div className="space-y-8">
+      {/* 创作模式 */}
+      <div>
+        <Label className="text-base font-medium">创作模式</Label>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          {MODES.map((m) => {
+            const Icon = m.icon;
+            return (
+              <button
+                key={m.id}
+                onClick={() => setMode(m.id)}
+                className={cn(
+                  'rounded-lg border-2 p-4 text-left transition-all',
+                  mode === m.id
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-primary/50'
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <Icon className={cn('h-5 w-5', mode === m.id ? 'text-primary' : 'text-muted-foreground')} />
+                  <p className="font-medium">{m.name}</p>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">{m.desc}</p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 平台选择 */}
+      <div>
+        <Label className="text-base font-medium">选择平台</Label>
+        <div className="mt-3 grid grid-cols-3 gap-3">
+          {PLATFORMS.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => p.available && setPlatform(p.id)}
+              disabled={!p.available}
+              className={cn(
+                'relative rounded-lg border-2 p-4 text-left transition-all',
+                platform === p.id
+                  ? 'border-primary bg-primary/5'
+                  : p.available
+                    ? 'border-border hover:border-primary/50'
+                    : 'border-border opacity-50 cursor-not-allowed'
+              )}
+            >
+              {!p.available && (
+                <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                  <Lock className="h-3 w-3" /> 即将上线
+                </span>
+              )}
+              <p className="font-medium">{p.name}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{p.desc}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 品牌/产品 */}
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <Label htmlFor="brand">品牌名称</Label>
+          <Input
+            id="brand"
+            placeholder="如：汤臣倍健"
+            value={brand}
+            onChange={(e) => setBrand(e.target.value)}
+            className="mt-1.5"
+          />
+        </div>
+        <div>
+          <Label htmlFor="product">产品名称 *</Label>
+          <Input
+            id="product"
+            placeholder="如：护肝片"
+            value={product}
+            onChange={(e) => setProduct(e.target.value)}
+            className="mt-1.5"
+          />
+        </div>
+      </div>
+
+      {/* 创作意图 */}
+      <div>
+        <Label htmlFor="intent">创作意图</Label>
+        <textarea
+          id="intent"
+          placeholder="描述你想要创作的内容方向，如：针对经常熬夜加班的年轻白领，推荐护肝片的日常保养功效..."
+          value={intent}
+          onChange={(e) => setIntent(e.target.value)}
+          rows={3}
+          className="mt-1.5 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+      </div>
+
+      {/* 场景标签 */}
+      <div>
+        <Label>场景标签 *</Label>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {SCENE_OPTIONS.map((s) => (
+            <button
+              key={s}
+              onClick={() => setScene(s)}
+              className={cn(
+                'rounded-full border px-3 py-1.5 text-sm transition-colors',
+                scene === s
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-border hover:border-primary/50'
+              )}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 风格偏好 */}
+      <div>
+        <Label>风格偏好 *</Label>
+        <div className="mt-2 grid grid-cols-2 gap-3">
+          {STYLE_OPTIONS.map((s) => (
+            <button
+              key={s.value}
+              onClick={() => setStyle(s.value)}
+              className={cn(
+                'rounded-lg border-2 p-3 text-left transition-all',
+                style === s.value
+                  ? 'border-primary bg-primary/5'
+                  : 'border-border hover:border-primary/50'
+              )}
+            >
+              <p className="font-medium text-sm">{s.label}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{s.desc}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 开始创作按钮 */}
+      <Button
+        onClick={() => { nextStep(); startCreation(); }}
+        disabled={!canStart}
+        className="w-full"
+        size="lg"
+      >
+        <Sparkles className="mr-2 h-4 w-4" />
+        开始创作
+      </Button>
+    </div>
+  );
+}
+ 
+========== FILE: frontend\src\components\create\step-topic.tsx ========== 
+'use client';
+
+import { useCreateStore, TopicOption } from '@/stores/create-store';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import { Lightbulb, Check } from 'lucide-react';
+
+export function StepTopic() {
+  const {
+    topicOptions, selectedTopic,
+    selectTopic, nextStep, prevStep, isProcessing,
+  } = useCreateStore();
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-lg font-medium flex items-center gap-2">
+          <Lightbulb className="h-5 w-5 text-yellow-500" />
+          选题推荐
+        </h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          基于您的产品和场景，AI 为您推荐以下选题方向
+        </p>
+      </div>
+
+      {isProcessing ? (
+        <div className="flex items-center justify-center py-12">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+          <span className="ml-3 text-muted-foreground">正在生成选题...</span>
+        </div>
+      ) : topicOptions.length === 0 ? (
+        <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
+          暂无选题推荐，请返回上一步调整需求
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {topicOptions.map((topic, index) => (
+            <TopicCard
+              key={index}
+              topic={topic}
+              isSelected={selectedTopic === topic.title}
+              onSelect={() => selectTopic(topic.title)}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className="flex gap-3">
+        <Button variant="outline" onClick={prevStep} className="flex-1">
+          上一步
+        </Button>
+        <Button
+          onClick={nextStep}
+          disabled={!selectedTopic}
+          className="flex-1"
+        >
+          下一步：确认素材
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function TopicCard({
+  topic,
+  isSelected,
+  onSelect,
+}: {
+  topic: TopicOption;
+  isSelected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      onClick={onSelect}
+      className={cn(
+        'w-full rounded-lg border-2 p-4 text-left transition-all',
+        isSelected
+          ? 'border-primary bg-primary/5'
+          : 'border-border hover:border-primary/50'
+      )}
+    >
+      <div className="flex items-start justify-between">
+        <div className="flex-1">
+          <p className="font-medium">{topic.title}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{topic.angle}</p>
+          {topic.keywords.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {topic.keywords.map((kw, i) => (
+                <span
+                  key={i}
+                  className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                >
+                  {kw}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="ml-3 flex items-center gap-2">
+          <span className="text-sm font-medium text-primary">{topic.score}分</span>
+          {isSelected && (
+            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary">
+              <Check className="h-4 w-4 text-primary-foreground" />
+            </div>
+          )}
+        </div>
+      </div>
+    </button>
+  );
+}
+ 
+========== FILE: frontend\src\components\create\step-title.tsx ========== 
+'use client';
+
+import { useCreateStore } from '@/stores/create-store';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { AgentStatus } from '@/components/shared/agent-status';
+import { cn } from '@/lib/utils';
+import { Check, RefreshCw, ArrowRight, ArrowLeft, Pencil } from 'lucide-react';
+
+export function StepTitle() {
+  const {
+    titleOptions, selectedTitles, customTitle, titleRetries, maxTitleRetries,
+    taskStatus, isProcessing, toggleTitle, setCustomTitle, refreshTitles,
+    selectTitle, nextStep, prevStep,
+  } = useCreateStore();
+
+  const canRefresh = titleRetries < maxTitleRetries;
+  const canProceed = selectedTitles.length > 0 || customTitle.trim().length > 0;
+  const isAwaitingSelection = taskStatus === 'awaiting_title_selection';
+
+  const handleNext = async () => {
+    // 如果是自定义标题，直接进入下一步
+    if (customTitle.trim().length > 0 && selectedTitles.length === 0) {
+      nextStep();
+      return;
+    }
+    // 如果选择了标题，通知后端
+    if (selectedTitles.length > 0) {
+      const selectedIndex = titleOptions.findIndex(t => t.title === selectedTitles[0]);
+      if (selectedIndex >= 0) {
+        await selectTitle(selectedIndex);
+      }
+      nextStep();
+    }
+  };
+
+  if (isProcessing) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 space-y-4">
+        <AgentStatus status="running" agentName="标题Agent" label="正在生成标题..." />
+        <p className="text-sm text-muted-foreground">运用8大标题策略，为你生成吸睛标题</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <div className="flex items-center justify-between">
+          <Label className="text-base font-medium">选择标题（最多2个）</Label>
+          <span className="text-xs text-muted-foreground">
+            已选 {selectedTitles.length}/2 · 换一批次数 {titleRetries}/{maxTitleRetries}
+          </span>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          {titleOptions.map((option, index) => {
+            const isSelected = selectedTitles.includes(option.title);
+            return (
+              <button
+                key={index}
+                onClick={() => toggleTitle(option.title)}
+                className={cn(
+                  'w-full rounded-lg border-2 p-4 text-left transition-all',
+                  isSelected
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-primary/30'
+                )}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <p className="font-medium">{option.title}</p>
+                    <div className="mt-2 flex items-center gap-3">
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                        {option.strategy}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        评分: {option.score}/10
+                      </span>
+                    </div>
+                    <p className="mt-1.5 text-xs text-muted-foreground">{option.reason}</p>
+                  </div>
+                  <div
+                    className={cn(
+                      'flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors',
+                      isSelected
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-muted-foreground/30'
+                    )}
+                  >
+                    {isSelected && <Check className="h-3.5 w-3.5" />}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 换一批按钮 */}
+        <Button
+          variant="outline"
+          className="mt-4 w-full"
+          disabled={!canRefresh || isProcessing}
+          onClick={() => refreshTitles()}
+        >
+          <RefreshCw className="mr-2 h-4 w-4" />
+          {canRefresh ? '换一批' : '已达重试上限'}
+        </Button>
+      </div>
+
+      {/* 自定义标题 */}
+      <div className="border-t border-border pt-6">
+        <Label htmlFor="custom-title" className="flex items-center gap-2">
+          <Pencil className="h-4 w-4" />
+          自定义标题
+        </Label>
+        <Input
+          id="custom-title"
+          placeholder="输入你自己的标题..."
+          value={customTitle}
+          onChange={(e) => setCustomTitle(e.target.value)}
+          className="mt-1.5"
+        />
+      </div>
+
+      {/* 操作按钮 */}
+      <div className="flex items-center justify-between">
+        <Button variant="outline" onClick={prevStep}>
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          上一步
+        </Button>
+        <Button onClick={handleNext} disabled={!canProceed || isProcessing}>
+          {isProcessing ? '提交中...' : '下一步'}
+          <ArrowRight className="ml-2 h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+ 
+========== FILE: frontend\src\components\create\step-article.tsx ========== 
+'use client';
+
+import { useCreateStore } from '@/stores/create-store';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { AgentStatus } from '@/components/shared/agent-status';
+import { AIScoreRing } from '@/components/shared/ai-score-ring';
+import { cn } from '@/lib/utils';
+import { RefreshCw, Edit3, ArrowRight, ArrowLeft, Save, X } from 'lucide-react';
+
+const DIMENSIONS = ['去AI味', '口语化', '情感共鸣', '信息密度', '可读性'];
+
+export function StepArticle() {
+  const {
+    article, aiScore, aiScoreDetails, articleRetries, maxArticleRetries,
+    isEditing, isProcessing,
+    setArticle, setIsEditing, regenerateArticle,
+    nextStep, prevStep,
+  } = useCreateStore();
+
+  const canRegenerate = articleRetries < maxArticleRetries;
+
+  if (isProcessing) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 space-y-4">
+        <AgentStatus status="running" agentName="正文Agent" label="正在创作正文..." />
+        <p className="text-sm text-muted-foreground">运用去AI味策略，生成自然流畅的内容</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* AI味评分仪表盘 */}
+      {aiScore > 0 && (
+        <div className="rounded-lg border border-border bg-card p-6">
+          <Label className="text-base font-medium">AI味评分</Label>
+          <div className="mt-4 flex items-center gap-8">
+            <AIScoreRing score={aiScore} size={100} strokeWidth={8} />
+            <div className="flex-1">
+              {/* 雷达图替代：5维度条形图 */}
+              <div className="space-y-2">
+                {DIMENSIONS.map((dim) => {
+                  const value = aiScoreDetails[dim] || 0;
+                  return (
+                    <div key={dim} className="flex items-center gap-3">
+                      <span className="w-16 text-xs text-muted-foreground">{dim}</span>
+                      <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={cn(
+                            'h-full rounded-full transition-all',
+                            value >= 80 ? 'bg-green-500' : value >= 60 ? 'bg-yellow-500' : 'bg-destructive'
+                          )}
+                          style={{ width: `${value}%` }}
+                        />
+                      </div>
+                      <span className="w-8 text-xs text-right text-muted-foreground">{value}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 正文预览/编辑 */}
+      <div className="rounded-lg border border-border bg-card">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <Label className="text-base font-medium">
+            {isEditing ? '手动编辑' : '正文预览'}
+          </Label>
+          <div className="flex gap-2">
+            {isEditing ? (
+              <>
+                <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)}>
+                  <X className="mr-1 h-3.5 w-3.5" />
+                  取消
+                </Button>
+                <Button size="sm" onClick={() => setIsEditing(false)}>
+                  <Save className="mr-1 h-3.5 w-3.5" />
+                  保存
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!canRegenerate || isProcessing}
+                  onClick={() => regenerateArticle()}
+                >
+                  <RefreshCw className="mr-1 h-3.5 w-3.5" />
+                  重新生成
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setIsEditing(true)}>
+                  <Edit3 className="mr-1 h-3.5 w-3.5" />
+                  手动编辑
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="p-4">
+          {isEditing ? (
+            <div className="space-y-2">
+              <textarea
+                value={article}
+                onChange={(e) => setArticle(e.target.value)}
+                rows={12}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+              />
+              <div className="flex justify-end">
+                <span className="text-xs text-muted-foreground">
+                  {article.length} 字
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="prose prose-sm dark:prose-invert max-w-none">
+              {article ? (
+                <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                  {article}
+                </div>
+              ) : (
+                <p className="text-muted-foreground">暂无正文内容</p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 操作按钮 */}
+      <div className="flex items-center justify-between">
+        <Button variant="outline" onClick={prevStep}>
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          上一步
+        </Button>
+        <Button onClick={nextStep} disabled={!article}>
+          下一步
+          <ArrowRight className="ml-2 h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+ 
+========== FILE: frontend\src\components\create\step-output.tsx ========== 
+'use client';
+
+import { useCreateStore } from '@/stores/create-store';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { AIScoreRing } from '@/components/shared/ai-score-ring';
+import { ComplianceBadge } from '@/components/shared/compliance-badge';
+import {
+  Copy, FileDown, RefreshCw, CheckCircle2, ArrowLeft,
+} from 'lucide-react';
+import { toast } from 'sonner';
+
+export function StepOutput() {
+  const {
+    selectedTitles, customTitle, article, tags,
+    aiScore, complianceReport, brand, product, reset, prevStep,
+  } = useCreateStore();
+
+  const finalTitle = customTitle || selectedTitles[0] || '';
+
+  const handleCopy = () => {
+    const text = `${finalTitle}\n\n${article}\n\n${tags.map((t) => `#${t}`).join(' ')}`;
+    navigator.clipboard.writeText(text);
+    toast.success('已复制到剪贴板');
+  };
+
+  const handleExportMarkdown = () => {
+    const md = `# ${finalTitle}\n\n${article}\n\n---\n\n${tags.map((t) => `#${t}`).join(' ')}`;
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${product || '笔记'}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('已导出 Markdown 文件');
+  };
+
+  const handleReset = () => {
+    reset();
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* 成功提示 */}
+      <div className="flex flex-col items-center py-4">
+        <CheckCircle2 className="h-16 w-16 text-green-500" />
+        <h2 className="mt-4 text-xl font-bold">创作完成！</h2>
+        <p className="mt-1 text-muted-foreground">
+          {brand && `${brand} · `}{product} · 小红书笔记
+        </p>
+      </div>
+
+      {/* 笔记包概览 */}
+      <div className="grid grid-cols-2 gap-4">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm text-muted-foreground">标题</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="font-medium">{finalTitle}</p>
+            {selectedTitles.length > 1 && (
+              <p className="mt-1 text-sm text-muted-foreground">
+                备选: {selectedTitles[1]}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm text-muted-foreground">质量指标</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-4">
+              <AIScoreRing score={aiScore} size={60} strokeWidth={5} showLabel={false} />
+              <div className="space-y-1">
+                <p className="text-sm">AI味评分: <span className="font-bold">{aiScore}</span></p>
+                {complianceReport && (
+                  <ComplianceBadge status={complianceReport.status} />
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="col-span-2">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm text-muted-foreground">正文预览</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm line-clamp-6 text-muted-foreground">{article}</p>
+            <p className="mt-2 text-xs text-muted-foreground">{article.length} 字</p>
+          </CardContent>
+        </Card>
+
+        <Card className="col-span-2">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm text-muted-foreground">标签</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {tags.map((tag) => (
+                <Badge key={tag} variant="secondary">#{tag}</Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* 操作按钮 */}
+      <div className="flex items-center justify-between">
+        <Button variant="outline" onClick={prevStep}>
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          返回修改
+        </Button>
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={handleCopy}>
+            <Copy className="mr-2 h-4 w-4" />
+            复制全文
+          </Button>
+          <Button variant="outline" onClick={handleExportMarkdown}>
+            <FileDown className="mr-2 h-4 w-4" />
+            导出 Markdown
+          </Button>
+          <Button onClick={handleReset}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            再创作一篇
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+ 
+========== FILE: frontend\src\components\shared\agent-status.tsx ========== 
+'use client';
+
+import { cn } from '@/lib/utils';
+import { Loader2, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { AgentStatusType } from '@/types';
+
+interface AgentStatusProps {
+  status: AgentStatusType;
+  label?: string;
+  agentName?: string;
+  className?: string;
+}
+
+const statusConfig: Record<AgentStatusType, { icon: typeof Loader2; label: string; className: string }> = {
+  idle: {
+    icon: Clock,
+    label: '等待中',
+    className: 'text-muted-foreground',
+  },
+  running: {
+    icon: Loader2,
+    label: '执行中',
+    className: 'text-blue-500',
+  },
+  completed: {
+    icon: CheckCircle2,
+    label: '已完成',
+    className: 'text-green-500',
+  },
+  failed: {
+    icon: XCircle,
+    label: '失败',
+    className: 'text-destructive',
+  },
+};
+
+export function AgentStatus({ status, label, agentName, className }: AgentStatusProps) {
+  const config = statusConfig[status];
+  const Icon = config.icon;
+
+  return (
+    <div className={cn('flex items-center gap-2', className)}>
+      <Icon
+        className={cn(
+          'h-4 w-4',
+          config.className,
+          status === 'running' && 'animate-spin'
+        )}
+      />
+      {agentName && (
+        <span className="text-sm font-medium">{agentName}</span>
+      )}
+      <span className={cn('text-sm', config.className)}>
+        {label || config.label}
+      </span>
+    </div>
+  );
+}
+
+export function AgentStatusCompact({
+  status,
+  className,
+}: {
+  status: AgentStatusType;
+  className?: string;
+}) {
+  const config = statusConfig[status];
+  const Icon = config.icon;
+
+  return (
+    <Icon
+      className={cn(
+        'h-4 w-4',
+        config.className,
+        status === 'running' && 'animate-spin',
+        className
+      )}
+    />
+  );
+}
+ 
+========== FILE: frontend\src\types\index.ts ========== 
+// 用户相关类型
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  enterprise_id: string | null;
+  avatar_url?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type UserRole = 'platform_admin' | 'platform_operator' | 'tenant_admin' | 'tenant_user';
+
+// 企业相关类型
+export interface Enterprise {
+  id: string;
+  name: string;
+  plan: PlanType;
+  quota_monthly: number;
+  quota_used: number;
+  status: EnterpriseStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export type PlanType = 'free' | 'basic' | 'professional' | 'enterprise';
+export type EnterpriseStatus = 'active' | 'suspended' | 'terminated';
+
+export interface EnterpriseQuota {
+  monthly_limit: number;
+  used: number;
+  reset_date: string;
+}
+
+// 知识库相关类型
+export interface KnowledgeEntry {
+  id: string;
+  data_level?: DataLevel;
+  platform_category?: PlatformCategory | null;
+  enterprise_id?: string | null;
+  category?: string | null;
+  title: string;
+  content: string;
+  source?: string | null;
+  source_url?: string | null;
+  tags?: string[];
+  metadata?: Record<string, unknown>;
+  created_by?: string | null;
+  updated_by?: string | null;
+  sync_status?: 'pending' | 'synced' | 'failed';
+  created_at?: string;
+  updated_at?: string;
+}
+
+export type DataLevel = 'platform' | 'tenant';
+export type PlatformCategory = 'public' | 'industry' | 'template';
+
+export interface KnowledgeStats {
+  total_entries: number;
+  by_category: Record<string, number>;
+  recent_updates: KnowledgeEntry[];
+}
+
+// 创作任务相关类型
+export interface CreateTask {
+  id: string;
+  platform: Platform;
+  product: string;
+  scene: string;
+  style?: string;
+  status: TaskStatus;
+  enterprise_id: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type Platform = 'xiaohongshu' | 'wechat' | 'douyin';
+export type TaskStatus = 'pending' | 'processing' | 'awaiting_title_selection' | 'awaiting_p2_decision' | 'completed' | 'failed';
+
+export type AgentStatusType = 'idle' | 'running' | 'completed' | 'failed';
+
+// 笔记输出相关类型
+export interface NoteOutput {
+  id: string;
+  task_id: string;
+  platform: Platform;
+  titles: TitleOption[];
+  selected_title: string;
+  article: string;
+  paragraphs: Paragraph[];
+  tags: string[];
+  ai_flavor_score: number;
+  compliance_report: ComplianceReport;
+  created_at: string;
+}
+
+export interface TitleOption {
+  title: string;
+  strategy: string;
+  score: number;
+  reason: string;
+}
+
+export interface Paragraph {
+  content: string;
+  function: string;
+}
+
+// 合规相关类型
+export interface ComplianceReport {
+  status: ComplianceStatus;
+  p0_issues: ComplianceIssue[];
+  p1_issues: ComplianceIssue[];
+  p2_issues: ComplianceIssue[];
+  suggestions: string[];
+}
+
+export type ComplianceStatus = 'passed' | 'needs_revision' | 'failed' | 'has_issues';
+
+export interface ComplianceIssue {
+  type: string;
+  description: string;
+  location?: string;
+  severity: 'p0' | 'p1' | 'p2';
+}
+
+// 素材包相关类型
+export interface MaterialPack {
+  brand: BrandInfo;
+  product: ProductInfo;
+  persona: PersonaInfo;
+  scene: SceneInfo;
+  compliance: ComplianceInfo;
+}
+
+export interface BrandInfo {
+  name: string;
+  tone: string[];
+  taboos: string[];
+}
+
+export interface ProductInfo {
+  name: string;
+  selling_points: string[];
+  ingredients: string[];
+  evidence: Record<string, unknown>;
+}
+
+export interface PersonaInfo {
+  profile: string;
+  pain_points: string[];
+  language_style: string;
+}
+
+export interface SceneInfo {
+  description: string;
+  usage_method: string;
+}
+
+export interface ComplianceInfo {
+  rules: string[];
+  forbidden_groups: string[];
+}
+
+// 数据分析相关类型
+export interface AnalyticsData {
+  summary: string;
+  top_notes: TopNote[];
+  topic_ranking: TopicRanking[];
+  insights: string[];
+  recommendations: string[];
+}
+
+export interface TopNote {
+  title: string;
+  metric: string;
+  value: number;
+}
+
+export interface TopicRanking {
+  topic: string;
+  avg_engagement: number;
+}
+
+// API 响应类型
+export interface ApiResponse<T> {
+  success: boolean;
+  data: T | null;
+  error: string | null;
+  message?: string;
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+// 认证相关类型
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  access_token: string;
+  token_type: string;
+  user: User;
+}
+
+export interface AuthState {
+  user: User | null;
+  token: string | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+}
+ 

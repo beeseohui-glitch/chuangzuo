@@ -1,12 +1,12 @@
 'use client';
 
 import { useCreateStore } from '@/stores/create-store';
-import { Heart, MessageCircle, Star, Share2, MoreHorizontal } from 'lucide-react';
+import { Heart, MessageCircle, Star, Share2, MoreHorizontal, Loader2, CheckCircle2, XCircle, Circle } from 'lucide-react';
 
 export function PreviewPanel() {
   const {
     currentStep, selectedTitles, customTitle, article, tags,
-    aiScore, brand, product,
+    aiScore, brand, product, agents, isProcessing, complianceReport,
   } = useCreateStore();
 
   const title = customTitle || selectedTitles[0] || (product ? `${product}推荐` : '笔记标题');
@@ -27,7 +27,58 @@ export function PreviewPanel() {
         <h3 className="text-sm font-medium">实时预览</h3>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Agent 状态指示器 */}
+        {agents.length > 0 && (
+          <div className="rounded-lg border p-3 space-y-2">
+            <p className="text-xs font-medium text-muted-foreground mb-2">Agent 状态</p>
+            {agents.map((agent) => (
+              <div key={agent.name} className="flex items-center gap-2 text-xs">
+                {agent.status === 'running' ? (
+                  <Loader2 className="h-3 w-3 animate-spin text-primary" />
+                ) : agent.status === 'completed' ? (
+                  <CheckCircle2 className="h-3 w-3 text-green-500" />
+                ) : agent.status === 'failed' ? (
+                  <XCircle className="h-3 w-3 text-destructive" />
+                ) : (
+                  <Circle className="h-3 w-3 text-muted-foreground" />
+                )}
+                <span className={agent.status === 'running' ? 'text-primary font-medium' : 'text-muted-foreground'}>
+                  {agent.name}
+                </span>
+                {agent.message && (
+                  <span className="text-muted-foreground truncate">{agent.message}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 处理中指示 */}
+        {isProcessing && agents.length === 0 && (
+          <div className="flex items-center gap-2 rounded-lg bg-primary/5 p-3 text-sm text-primary">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>AI 正在创作中...</span>
+          </div>
+        )}
+
+        {/* 合规状态 */}
+        {complianceReport && (
+          <div className={`rounded-lg p-3 text-sm ${
+            complianceReport.status === 'passed'
+              ? 'bg-green-500/10 text-green-600 dark:text-green-400'
+              : complianceReport.p0_issues?.length > 0
+                ? 'bg-destructive/10 text-destructive'
+                : 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400'
+          }`}>
+            {complianceReport.status === 'passed'
+              ? '✓ 合规检查通过'
+              : complianceReport.p0_issues?.length > 0
+                ? `✗ ${complianceReport.p0_issues.length} 个必须修改项`
+                : '⚠ 有建议修改项'}
+          </div>
+        )}
+
         {/* 模拟小红书卡片 */}
         <div className="mx-auto max-w-[320px] overflow-hidden rounded-xl bg-card shadow-lg">
           {/* 封面区域 */}
@@ -111,7 +162,7 @@ export function PreviewPanel() {
         </div>
 
         {/* 步骤提示 */}
-        <div className="mt-6 rounded-lg bg-muted p-3">
+        <div className="rounded-lg bg-muted p-3">
           <p className="text-xs text-muted-foreground text-center">
             {getStepHint(currentStep)}
           </p>
@@ -124,6 +175,7 @@ export function PreviewPanel() {
 function getStepHint(step: string): string {
   const hints: Record<string, string> = {
     input: '填写需求后开始预览',
+    topic: '选择选题方向后继续',
     material: '素材已加载，继续选择标题',
     title: '选择标题后预览效果',
     article: '正文创作完成，查看AI味评分',

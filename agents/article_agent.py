@@ -13,6 +13,7 @@ from typing import Optional
 
 from crewai import Agent
 from crewai.tools import BaseTool
+from pydantic import BaseModel
 
 from config import ARTICLE_AGENT, LLMManagerConfig
 from config.llm_config import get_llm_for_agent
@@ -222,4 +223,94 @@ class ArticleAgent:
                 result.append(Paragraph(content=p.strip(), function=func))
 
         return result
+
+
+class ArticleAgentRequest(BaseModel):
+    """ArticleAgent 独立调用请求"""
+    title: str
+    material_pack: dict
+
+
+def _article_run_standalone(self, req: ArticleAgentRequest) -> NoteOutput:
+    return self.generate(title=req.title, material_pack=req.material_pack)
+
+
+def _article_generate_with_correction(
+    self,
+    title: str,
+    material_pack: dict,
+    correction,  # CorrectionRequest
+) -> NoteOutput:
+    """带修正指令的正文生成 - 精准修改而非全文重写"""
+    from models.agent_message import CorrectionRequest
+
+    correction_lines = []
+    for f in correction.feedbacks:
+        if f.original_text:
+            correction_lines.append(
+                f"- [{f.severity}] {f.issue_location}: 将「{f.original_text}」改为「{f.suggestion}」"
+            )
+        else:
+            correction_lines.append(
+                f"- [{f.severity}] {f.issue_location}: {f.suggestion}"
+            )
+    correction_text = "\n".join(correction_lines)
+
+    prompt = self._build_prompt(title, material_pack, attempt=0)
+    prompt += f"""
+
+【修正指令】
+以下内容存在合规问题，请精准修改有问题的部分，保留其余内容不变：
+
+{correction_text}
+
+要求：
+1. 只修改有问题的段落，不要重写整篇文章
+2. 保持文章整体风格和结构不变
+3. 确保修改后的内容自然流畅
+"""
+
+    total_start = time.time()
+
+    try:
+        t = time.time()
+        response = self.agent.kickoff(prompt)
+        content = response.content if hasattr(response, "content") else str(response)
+        data = LLMResponseParser.parse_json(content)
+        llm_elapsed = (time.time() - t) * 1000
+        print(f"[耗时] 正文Agent - 修正模式LLM调用: {llm_elapsed:.0f}ms")
+
+        if 'title' not in data:
+            data['title'] = title
+
+        note = NoteOutput(**data)
+
+        t = time.time()
+        ai_score = self._scorer.score(note.article)
+        note.ai_flavor_score = ai_score
+        score_elapsed = (time.time() - t) * 1000
+        print(f"[耗时] 正文Agent - AI味评分: {score_elapsed:.0f}ms (分数: {ai_score})")
+
+        if not note.paragraphs:
+            note.paragraphs = self._build_paragraphs(note.article)
+
+        total_elapsed = (time.time() - total_start) * 1000
+        print(f"[耗时] 正文Agent - 修正模式总计: {total_elapsed:.0f}ms")
+        return note
+
+    except Exception as e:
+        logger.error(f"Article correction failed: {e}")
+        total_elapsed = (time.time() - total_start) * 1000
+        print(f"[耗时] 正文Agent - 修正模式总计: {total_elapsed:.0f}ms (失败)")
+        return NoteOutput(
+            title=title,
+            article="",
+            tags=[],
+            ai_flavor_score=0,
+            metadata={"error": f"正文修正失败: {e}"},
+        )
+
+
+ArticleAgent.run_standalone = _article_run_standalone
+ArticleAgent.generate_with_correction = _article_generate_with_correction
 

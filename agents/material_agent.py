@@ -10,6 +10,7 @@ from typing import Optional
 
 from crewai import Agent
 from crewai.tools import BaseTool
+from pydantic import BaseModel
 
 from config import MATERIAL_SEARCH_AGENT, LLMManagerConfig
 from models import MaterialPack
@@ -75,3 +76,23 @@ class MaterialAgent:
             persona=persona or "",
             enterprise_id=enterprise_id or "",
         )
+
+
+class MaterialAgentRequest(BaseModel):
+    """MaterialAgent 独立调用请求"""
+    product: str
+    scene: Optional[str] = None
+    persona: Optional[str] = None
+    enterprise_id: Optional[str] = None
+
+
+def _material_run_standalone(self, req: MaterialAgentRequest) -> MaterialPack:
+    return self.search(
+        product=req.product,
+        scene=req.scene,
+        persona=req.persona,
+        enterprise_id=req.enterprise_id,
+    )
+
+
+MaterialAgent.run_standalone = _material_run_standalone

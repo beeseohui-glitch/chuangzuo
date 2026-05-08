@@ -13,6 +13,7 @@ from typing import Optional
 
 from crewai import Agent
 from crewai.tools import BaseTool
+from pydantic import BaseModel
 
 from config import TITLE_AGENT, LLMManagerConfig
 from config.llm_config import get_llm_for_agent
@@ -146,3 +147,22 @@ class TitleAgent:
 }
 """
         return prompt
+
+
+class TitleAgentRequest(BaseModel):
+    """TitleAgent 独立调用请求"""
+    topic: str
+    material_pack: dict
+    historical_titles: Optional[list[str]] = None
+
+
+# 为 TitleAgent 添加 run_standalone 方法
+def _title_run_standalone(self, req: TitleAgentRequest) -> TitleOutput:
+    return self.generate(
+        topic=req.topic,
+        material_pack=req.material_pack,
+        historical_titles=req.historical_titles,
+    )
+
+
+TitleAgent.run_standalone = _title_run_standalone

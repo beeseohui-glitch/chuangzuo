@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse
 from api.auth import LoginRequest, LoginResponse, UserInfo, authenticate, create_access_token
 from api.db import close_pool
 from api.deps import get_current_user
-from api.routes import create, tenant_knowledge, platform_knowledge, platform_tenants, analytics
+from api.routes import create, tenant_knowledge, platform_knowledge, platform_tenants, analytics, agents
 
 logger = logging.getLogger("api")
 
@@ -205,6 +205,7 @@ app.include_router(tenant_knowledge.router)
 app.include_router(platform_knowledge.router)
 app.include_router(platform_tenants.router)
 app.include_router(analytics.router)
+app.include_router(agents.router)
 
 # ── 启动 ──────────────────────────────────────────────────
 

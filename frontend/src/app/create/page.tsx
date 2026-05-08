@@ -4,6 +4,7 @@ import { AppLayout } from '@/components/layout/app-layout';
 import { useCreateStore } from '@/stores/create-store';
 import { PreviewPanel } from '@/components/create/preview-panel';
 import { StepInput } from '@/components/create/step-input';
+import { StepTopic } from '@/components/create/step-topic';
 import { StepMaterial } from '@/components/create/step-material';
 import { StepTitle } from '@/components/create/step-title';
 import { StepArticle } from '@/components/create/step-article';
@@ -12,6 +13,7 @@ import { StepOutput } from '@/components/create/step-output';
 
 const STEP_COMPONENTS: Record<string, React.ComponentType> = {
   input: StepInput,
+  topic: StepTopic,
   material: StepMaterial,
   title: StepTitle,
   article: StepArticle,

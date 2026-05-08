@@ -8,6 +8,7 @@ from typing import Optional
 
 from crewai import Agent
 from crewai.tools import BaseTool
+from pydantic import BaseModel
 
 from config import TOPIC_AGENT, LLMManagerConfig
 from config.llm_config import get_llm_for_agent
@@ -129,3 +130,25 @@ class TopicAgent:
 输出格式：
 {{"topics": [{{"id": "topic_{{timestamp}}_{{random}}", "title": "标题", "description": "描述", "category": "{category}", "source": "trending", "keywords": ["关键词1", "关键词2"], "target_persona": "{target_persona}", "estimated_views": 10000, "competition_level": "medium", "recommended_platforms": ["xiaohongshu"], "content_angle": "角度"}}]}}
 """
+
+
+class TopicAgentRequest(BaseModel):
+    """TopicAgent 独立调用请求"""
+    category: str
+    product: str
+    brand_name: str = ""
+    target_persona: str = ""
+    num_topics: int = 5
+
+
+def _topic_run_standalone(self, req: TopicAgentRequest) -> TopicListOutput:
+    return self.generate_topics(
+        category=req.category,
+        product=req.product,
+        brand_name=req.brand_name,
+        target_persona=req.target_persona,
+        num_topics=req.num_topics,
+    )
+
+
+TopicAgent.run_standalone = _topic_run_standalone

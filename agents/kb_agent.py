@@ -6,6 +6,7 @@ from typing import Optional
 
 from crewai import Agent
 from crewai.tools import BaseTool
+from pydantic import BaseModel
 
 from config import LLMManagerConfig
 from config.llm_config import get_llm_for_agent
@@ -113,3 +114,18 @@ class KnowledgeBaseAgent:
             context_parts.append(f"## {entry.title}\n{entry.content[:500]}...")
 
         return "\n\n".join(context_parts)
+
+
+class KBAgentRequest(BaseModel):
+    """KnowledgeBaseAgent 独立调用请求"""
+    query: str
+    category: Optional[str] = None
+    tags: Optional[list[str]] = None
+    limit: int = 10
+
+
+def _kb_run_standalone(self, req: KBAgentRequest) -> SearchResult:
+    return self.search(query=req.query, category=req.category, tags=req.tags, limit=req.limit)
+
+
+KnowledgeBaseAgent.run_standalone = _kb_run_standalone

@@ -14,6 +14,7 @@ from typing import Optional
 
 from crewai import Agent
 from crewai.tools import BaseTool
+from pydantic import BaseModel
 
 from config import COMPLIANCE_AGENT, LLMManagerConfig, XiaohongshuConfig
 from config.llm_config import get_llm_for_agent
@@ -190,4 +191,41 @@ P2（需人工确认）：灰色地带表述、创意表达边界
             return ComplianceReport(**data)
 
         raise ValueError(f"Cannot parse ComplianceReport from response: {content[:200]}")
+
+
+class ComplianceAgentRequest(BaseModel):
+    """ComplianceAgent 独立调用请求"""
+    title: str
+    article: str
+    tags: list[str] = []
+    brand_taboos: Optional[list[str]] = None
+
+
+def _compliance_run_standalone(self, req: ComplianceAgentRequest) -> ComplianceReport:
+    return self.check(
+        title=req.title,
+        article=req.article,
+        tags=req.tags,
+        brand_taboos=req.brand_taboos,
+    )
+
+
+def _compliance_generate_correction_request(self, report: ComplianceReport):
+    """将合规报告转换为结构化修正请求"""
+    from models.agent_message import ComplianceFeedback, CorrectionRequest
+
+    feedbacks = []
+    for issue in (report.p0_issues + report.p1_issues):
+        feedbacks.append(ComplianceFeedback(
+            issue_content=issue.content,
+            issue_location=issue.location,
+            severity=issue.severity.value,
+            suggestion=issue.suggestion,
+            original_text=getattr(issue, 'original_text', ''),
+        ))
+    return CorrectionRequest(feedbacks=feedbacks)
+
+
+ComplianceAgent.run_standalone = _compliance_run_standalone
+ComplianceAgent.generate_correction_request = _compliance_generate_correction_request
 

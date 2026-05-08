@@ -33,6 +33,13 @@ from tools.prompt_tools import prompt_manager
 from tools.crewai_llm import create_llm
 
 
+class OperationAgentRequest(BaseModel):
+    """OperationAgent 独立调用请求"""
+    pending_content: list[dict]
+    target_platforms: list[str]
+    start_date: Optional[str] = None
+
+
 class OperationAgent:
     """内容运营Agent"""
 
@@ -184,3 +191,14 @@ class OperationAgent:
             matrix[f"{platform}_count"] = platform_counts.get(platform, 0)
 
         return matrix
+
+
+def _operation_run_standalone(self, req: OperationAgentRequest) -> OperationOutput:
+    return self.generate_schedule(
+        pending_content=req.pending_content,
+        target_platforms=req.target_platforms,
+        start_date=req.start_date,
+    )
+
+
+OperationAgent.run_standalone = _operation_run_standalone

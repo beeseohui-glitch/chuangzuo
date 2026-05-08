@@ -13,6 +13,7 @@ from typing import Optional
 
 from crewai import Agent
 from crewai.tools import BaseTool
+from pydantic import BaseModel
 
 from config import TAG_AGENT, LLMManagerConfig
 from config.llm_config import get_llm_for_agent
@@ -172,4 +173,18 @@ class TagAgent:
                 return data["tags"]
 
         raise ValueError(f"Cannot parse tags from response: {content[:200]}")
+
+
+class TagAgentRequest(BaseModel):
+    """TagAgent 独立调用请求"""
+    article: str
+    title: str
+    material_pack: dict
+
+
+def _tag_run_standalone(self, req: TagAgentRequest) -> list[str]:
+    return self.generate(article=req.article, title=req.title, material_pack=req.material_pack)
+
+
+TagAgent.run_standalone = _tag_run_standalone
 

@@ -1,11 +1,26 @@
 'use client';
 
-import { useCreateStore } from '@/stores/create-store';
+import { useCreateStore, CreateMode } from '@/stores/create-store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import { Sparkles, Lock } from 'lucide-react';
+import { Sparkles, Lock, Zap, BookOpen } from 'lucide-react';
+
+const MODES = [
+  {
+    id: 'quick' as CreateMode,
+    name: '快速创作',
+    desc: '素材 → 标题 → 正文 → 标签 → 合规',
+    icon: Zap,
+  },
+  {
+    id: 'full' as CreateMode,
+    name: '数据驱动',
+    desc: '选题推荐 → 素材 → 标题 → 正文 → 标签 → 合规',
+    icon: BookOpen,
+  },
+];
 
 const PLATFORMS = [
   {
@@ -42,14 +57,42 @@ const STYLE_OPTIONS = [
 
 export function StepInput() {
   const {
-    platform, brand, product, intent, scene, style,
-    setPlatform, setBrand, setProduct, setIntent, setScene, setStyle, nextStep, startCreation,
+    platform, mode, brand, product, intent, scene, style,
+    setPlatform, setMode, setBrand, setProduct, setIntent, setScene, setStyle, nextStep, startCreation,
   } = useCreateStore();
 
   const canStart = platform && product && scene && style;
 
   return (
     <div className="space-y-8">
+      {/* 创作模式 */}
+      <div>
+        <Label className="text-base font-medium">创作模式</Label>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          {MODES.map((m) => {
+            const Icon = m.icon;
+            return (
+              <button
+                key={m.id}
+                onClick={() => setMode(m.id)}
+                className={cn(
+                  'rounded-lg border-2 p-4 text-left transition-all',
+                  mode === m.id
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-primary/50'
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <Icon className={cn('h-5 w-5', mode === m.id ? 'text-primary' : 'text-muted-foreground')} />
+                  <p className="font-medium">{m.name}</p>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">{m.desc}</p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* 平台选择 */}
       <div>
         <Label className="text-base font-medium">选择平台</Label>

@@ -1,8 +1,16 @@
 import { create } from 'zustand';
 import { Platform, TaskStatus, MaterialPack, TitleOption, NoteOutput, ComplianceReport, AgentStatusType } from '@/types';
+
+export interface TopicOption {
+  title: string;
+  angle: string;
+  keywords: string[];
+  score: number;
+}
 import { createApi } from '@/lib/api';
 
-export type CreateStep = 'input' | 'material' | 'title' | 'article' | 'tags' | 'output';
+export type CreateMode = 'quick' | 'full';
+export type CreateStep = 'input' | 'topic' | 'material' | 'title' | 'article' | 'tags' | 'output';
 
 export interface StepStatus {
   step: CreateStep;
@@ -19,6 +27,7 @@ export interface AgentState {
 interface CreateStore {
   // 流程状态
   platform: Platform | null;
+  mode: CreateMode;
   currentStep: CreateStep;
   steps: StepStatus[];
   taskStatus: TaskStatus;
@@ -31,7 +40,11 @@ interface CreateStore {
   scene: string;
   style: string;
 
-  // Step 2 - 素材确认
+  // Step 2 - 选题推荐（full模式）
+  topicOptions: TopicOption[];
+  selectedTopic: string;
+
+  // Step 3 - 素材确认
   materialPack: MaterialPack | null;
   materialMissing: string[];
 
@@ -67,12 +80,15 @@ interface CreateStore {
   error: string | null;
 
   // Actions
+  setMode: (mode: CreateMode) => void;
   setPlatform: (platform: Platform) => void;
   setBrand: (brand: string) => void;
   setProduct: (product: string) => void;
   setIntent: (intent: string) => void;
   setScene: (scene: string) => void;
   setStyle: (style: string) => void;
+  setTopicOptions: (options: TopicOption[]) => void;
+  selectTopic: (topic: string) => void;
   setCurrentStep: (step: CreateStep) => void;
   setStepStatus: (step: CreateStep, status: StepStatus['status']) => void;
   setMaterialPack: (pack: MaterialPack) => void;
@@ -111,10 +127,20 @@ interface CreateStore {
   reset: () => void;
 }
 
-const STEP_ORDER: CreateStep[] = ['input', 'material', 'title', 'article', 'tags', 'output'];
+const STEP_ORDER: CreateStep[] = ['input', 'topic', 'material', 'title', 'article', 'tags', 'output'];
 
-const INITIAL_STEPS: StepStatus[] = [
+const QUICK_STEPS: StepStatus[] = [
   { step: 'input', label: '输入需求', status: 'active' },
+  { step: 'material', label: '素材确认', status: 'pending' },
+  { step: 'title', label: '标题选择', status: 'pending' },
+  { step: 'article', label: '正文创作', status: 'pending' },
+  { step: 'tags', label: '标签与合规', status: 'pending' },
+  { step: 'output', label: '完成交付', status: 'pending' },
+];
+
+const FULL_STEPS: StepStatus[] = [
+  { step: 'input', label: '输入需求', status: 'active' },
+  { step: 'topic', label: '选题推荐', status: 'pending' },
   { step: 'material', label: '素材确认', status: 'pending' },
   { step: 'title', label: '标题选择', status: 'pending' },
   { step: 'article', label: '正文创作', status: 'pending' },
@@ -124,8 +150,9 @@ const INITIAL_STEPS: StepStatus[] = [
 
 const INITIAL_STATE = {
   platform: null as Platform | null,
+  mode: 'quick' as CreateMode,
   currentStep: 'input' as CreateStep,
-  steps: INITIAL_STEPS,
+  steps: QUICK_STEPS,
   taskStatus: 'pending' as TaskStatus,
   taskId: null as string | null,
 
@@ -134,6 +161,9 @@ const INITIAL_STATE = {
   intent: '',
   scene: '',
   style: '',
+
+  topicOptions: [] as TopicOption[],
+  selectedTopic: '',
 
   materialPack: null as MaterialPack | null,
   materialMissing: [] as string[],
@@ -208,12 +238,16 @@ function _pollTaskStatus(
 export const useCreateStore = create<CreateStore>((set, get) => ({
   ...INITIAL_STATE,
 
+  setMode: (mode) => set({ mode, steps: mode === 'full' ? FULL_STEPS : QUICK_STEPS }),
   setPlatform: (platform) => set({ platform }),
   setBrand: (brand) => set({ brand }),
   setProduct: (product) => set({ product }),
   setIntent: (intent) => set({ intent }),
   setScene: (scene) => set({ scene }),
   setStyle: (style) => set({ style }),
+
+  setTopicOptions: (options) => set({ topicOptions: options }),
+  selectTopic: (topic) => set({ selectedTopic: topic }),
 
   setCurrentStep: (step) => {
     const steps = get().steps.map((s) => {
@@ -418,13 +452,23 @@ export const useCreateStore = create<CreateStore>((set, get) => ({
     set({ isProcessing: true, error: null });
 
     try {
-      // 调用后端创建接口
-      const res = await createApi.startCreation({
-        product: state.product,
-        scene: state.scene,
-        persona: state.intent,
-        platform: state.platform || 'xiaohongshu',
-      });
+      // 根据模式调用不同接口
+      const apiCall = state.mode === 'full'
+        ? createApi.startFullCreation({
+            product: state.product,
+            scene: state.scene,
+            persona: state.intent,
+            platform: state.platform || 'xiaohongshu',
+            mode: 'full',
+          })
+        : createApi.startCreation({
+            product: state.product,
+            scene: state.scene,
+            persona: state.intent,
+            platform: state.platform || 'xiaohongshu',
+          });
+
+      const res = await apiCall;
 
       if (!res.success || !res.data) {
         set({ error: res.error || '创作请求失败', isProcessing: false });
@@ -449,6 +493,13 @@ export const useCreateStore = create<CreateStore>((set, get) => ({
           switch (data.type) {
             case 'progress':
               set({ isProcessing: true });
+              break;
+
+            case 'topic_options':
+              set({
+                topicOptions: data.topic_options || [],
+                isProcessing: false,
+              });
               break;
 
             case 'material_ready':
@@ -497,6 +548,7 @@ export const useCreateStore = create<CreateStore>((set, get) => ({
               if (data.result) {
                 const result = data.result;
                 set({
+                  topicOptions: result.topic_options || get().topicOptions,
                   materialPack: result.material_pack || null,
                   materialMissing: result.material_pack ? [] : ['素材包未返回'],
                   titleOptions: result.title_options || [],

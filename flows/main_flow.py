@@ -1,12 +1,18 @@
 """
 主 Flow - 统一调度和路由
+
+使用 OrchestratorAgent 进行智能意图识别和路由，
+替代简单的关键词匹配。
 """
 
+import logging
 from typing import Optional, Literal
 from crewai.flow.flow import Flow, listen, start
 
 from config import PlatformType
 from models import MaterialPack
+
+logger = logging.getLogger(__name__)
 
 
 class MainFlow(Flow):
@@ -14,7 +20,7 @@ class MainFlow(Flow):
     主工作流 - 统一调度
 
     流程：
-    1. route - 意图识别和路由
+    1. route - 使用 OrchestratorAgent 进行意图识别和路由
     2. dispatch - 分发到对应平台工作流
     """
 
@@ -26,7 +32,7 @@ class MainFlow(Flow):
     @start()
     def route(self, user_input: dict) -> dict:
         """
-        意图识别和路由
+        意图识别和路由（使用 OrchestratorAgent）
 
         Args:
             user_input: 包含 text, enterprise_id, history
@@ -34,32 +40,44 @@ class MainFlow(Flow):
         Returns:
             dict: 路由结果
         """
+        from agents.orchestrator_agent import OrchestratorAgent
+
         text = user_input.get("text", "")
         enterprise_id = user_input.get("enterprise_id")
 
-        # 简单的平台识别
-        platform = self._detect_platform(text)
+        # 使用 OrchestratorAgent 进行智能路由
+        orchestrator = OrchestratorAgent(enterprise_id=enterprise_id)
+        result = orchestrator.route(text)
 
-        if platform is None:
+        if result.needs_clarification:
             return {
                 "needs_clarification": True,
-                "question": "请问您想创作哪个平台的内容？小红书/公众号/抖音？",
+                "question": result.clarification_question or "请问您想创作哪个平台的内容？",
                 "platform": None,
             }
 
-        # 提取关键信息
-        product = self._extract_product(text)
-        scene = self._extract_scene(text)
-        style = self._extract_style(text)
+        # 映射平台字符串到 PlatformType
+        platform_map = {
+            "xiaohongshu": PlatformType.XIAOHONGSHU,
+            "xhs": PlatformType.XIAOHONGSHU,
+            "小红书": PlatformType.XIAOHONGSHU,
+            "wechat_public": PlatformType.WECHAT_PUBLIC,
+            "公众号": PlatformType.WECHAT_PUBLIC,
+            "douyin": PlatformType.DOUYIN,
+            "抖音": PlatformType.DOUYIN,
+        }
+
+        platform = platform_map.get(result.platform.lower() if result.platform else "", None)
 
         self._platform = platform
         self._route_result = {
             "platform": platform,
-            "product": product,
-            "scene": scene,
-            "style": style,
+            "product": result.product or "",
+            "scene": result.scene,
+            "style": result.style,
             "enterprise_id": enterprise_id,
             "needs_clarification": False,
+            "confidence": result.confidence,
         }
 
         return self._route_result

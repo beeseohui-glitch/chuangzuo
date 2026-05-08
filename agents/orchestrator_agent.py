@@ -307,3 +307,55 @@ class OrchestratorAgent:
             "clarification_rounds": self._clarification_rounds,
             "llm_status": self.llm_tool.get_status() if self._llm_tool else None,
         }
+
+
+def _orchestrator_run_standalone(self, user_input: str) -> OrchestratorOutput:
+    return self.route(user_input=user_input)
+
+
+OrchestratorAgent.run_standalone = _orchestrator_run_standalone
+
+
+# ── AgentTool：将任意 Agent 包装为 Orchestrator 可调用的 Tool ──
+
+from crewai.tools import BaseTool as CrewAIBaseTool
+
+
+class AgentTool(CrewAIBaseTool):
+    """将 Agent 包装为 Tool，供 Orchestrator 调用"""
+    name: str = "call_agent"
+    description: str = (
+        "调用指定 Agent 执行任务。"
+        "输入参数: agent_name (Agent名称), method (方法名), params (参数dict)。"
+        "可用 agent: title, article, tag, compliance, material, topic, kb, analytics, operation, wechat, douyin"
+    )
+
+    def _run(self, agent_name: str, method: str, params: dict = {}) -> str:
+        """
+        调用指定 Agent
+
+        Args:
+            agent_name: Agent 名称
+            method: 方法名
+            params: 参数字典
+
+        Returns:
+            JSON 格式的执行结果
+        """
+        from agents.base_agent import BaseAgentRunner, AgentRequest
+
+        runner = BaseAgentRunner()
+        result = runner.run(AgentRequest(
+            agent_name=agent_name,
+            method=method,
+            params=params,
+        ))
+
+        if result.success:
+            data = result.data
+            # 将 Pydantic model 转为 dict
+            if hasattr(data, 'model_dump'):
+                return json.dumps(data.model_dump(exclude_none=True), ensure_ascii=False)
+            return json.dumps({"result": str(data)}, ensure_ascii=False)
+        else:
+            return json.dumps({"error": result.error}, ensure_ascii=False)

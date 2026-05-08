@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 from crewai import Agent
 from crewai.tools import BaseTool
+from pydantic import BaseModel
 
 from config import LLMManagerConfig
 from config.llm_config import get_llm_for_agent
@@ -199,3 +200,21 @@ class AnalyticsAgent:
             recommendations.append("数据表现良好，继续保持当前创作策略")
 
         return recommendations
+
+
+class AnalyticsAgentRequest(BaseModel):
+    """AnalyticsAgent 独立调用请求"""
+    period_start: str
+    period_end: str
+    content_data: list[dict] = []
+
+
+def _analytics_run_standalone(self, req: AnalyticsAgentRequest) -> AnalyticsData:
+    return self.generate_report(
+        period_start=req.period_start,
+        period_end=req.period_end,
+        content_data=req.content_data,
+    )
+
+
+AnalyticsAgent.run_standalone = _analytics_run_standalone

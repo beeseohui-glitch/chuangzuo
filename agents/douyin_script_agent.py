@@ -6,6 +6,7 @@ from typing import Optional
 
 from crewai import Agent
 from crewai.tools import BaseTool
+from pydantic import BaseModel
 
 from config import LLMManagerConfig, DouyinConfig
 from config.llm_config import get_llm_for_agent
@@ -139,4 +140,22 @@ class DouyinScriptAgent:
 输出格式为JSON：
 {{"title": "标题", "hooks": "开场钩子", "script_content": "主体脚本", "cta": "行动号召", "duration_seconds": {duration_seconds}, "visual_suggestions": ["建议1", "建议2"], "hashtags": ["#话题1", "#话题2"]}}
 """
+
+
+class DouyinScriptAgentRequest(BaseModel):
+    """DouyinScriptAgent 独立调用请求"""
+    topic: str
+    material_pack: dict
+    duration_seconds: int = 60
+
+
+def _douyin_run_standalone(self, req: DouyinScriptAgentRequest) -> DouyinContent:
+    return self.generate_script(
+        topic=req.topic,
+        material_pack=req.material_pack,
+        duration_seconds=req.duration_seconds,
+    )
+
+
+DouyinScriptAgent.run_standalone = _douyin_run_standalone
 

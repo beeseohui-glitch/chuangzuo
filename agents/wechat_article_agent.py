@@ -6,6 +6,7 @@ from typing import Optional
 
 from crewai import Agent
 from crewai.tools import BaseTool
+from pydantic import BaseModel
 
 from config import LLMManagerConfig, WechatPublicConfig
 from config.llm_config import get_llm_for_agent
@@ -128,4 +129,22 @@ class WechatArticleAgent:
 输出格式为JSON：
 {{"title": "标题", "subtitle": "副标题（可选）", "content": "正文HTML", "summary": "摘要", "tags": ["标签1", "标签2"]}}
 """
+
+
+class WechatArticleAgentRequest(BaseModel):
+    """WechatArticleAgent 独立调用请求"""
+    title: str
+    material_pack: dict
+    target_length: str = "medium"
+
+
+def _wechat_run_standalone(self, req: WechatArticleAgentRequest) -> PublicAccountContent:
+    return self.generate_article(
+        title=req.title,
+        material_pack=req.material_pack,
+        target_length=req.target_length,
+    )
+
+
+WechatArticleAgent.run_standalone = _wechat_run_standalone
 
